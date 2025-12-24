@@ -35,7 +35,7 @@ class ChatRequest(BaseModel):
 # -----------------------------------------------------------
 # CRITICAL: Configure the path to your Frontend directory.
 # -----------------------------------------------------------
-ABSOLUTE_FRONTEND_PATH = Path(__file__).parent.parent / "Frontend-new"
+ABSOLUTE_FRONTEND_PATH = Path(__file__).parent.parent / "Frontend(basic)"
 PDF_FOLDER = Path(__file__).parent / "pdf"
 PDF_FOLDER.mkdir(exist_ok=True) 
 
@@ -94,7 +94,7 @@ def run_processing_pipeline(pdf_path: Path):
         
         print(f"\n--- [PIPELINE START] Processing: {pdf_path.name} (Collection: {file_stem}) ---")
 
-        # --- 1. Run Base.py ---
+        # --- 1. Run Base.py --- 
         # Note: Base.py still uses the *original* PDF path
         print(f"[TASK 1/3] Running Base.py (PDF to Markdown)...")
         cmd_base = [python_executable, "Base.py", str(pdf_path)]
