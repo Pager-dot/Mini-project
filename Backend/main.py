@@ -10,18 +10,18 @@ import sys
 from pydantic import BaseModel  
 from contextlib import asynccontextmanager
 import re  # <-- ADDED THIS IMPORT
+from langchain_core.messages import HumanMessage, AIMessage # <--- NEW
 
 # --- NEW: Import RAG components ---
-from rag_components import load_models, get_rag_chain_for_collection
+from rag_components import load_models, get_rag_chain_for_collection, check_and_ingest_json
 
 # --- NEW: Lifespan event handler ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # This code runs on startup
     print("Application startup...")
-    load_models()  # Load the LLM and Embedding models
+    load_models()       # Load AI Models
+    check_and_ingest_json() # <--- NEW: Checks/Creates JSON collection
     yield
-    # This code runs on shutdown (if needed)
     print("Application shutdown...")
 
 # --- MODIFIED: Initialize FastAPI with the lifespan event ---
@@ -30,7 +30,8 @@ app = FastAPI(lifespan=lifespan)
 # --- NEW: Pydantic model for the chat request ---
 class ChatRequest(BaseModel):
     message: str
-    collection_name: str
+    collection_name: str | None = None
+    history: list[dict] = []
 
 # -----------------------------------------------------------
 # CRITICAL: Configure the path to your Frontend directory.
@@ -165,14 +166,18 @@ def transcribe_and_translate_audio(audio_content: bytes) -> dict:
 # -----------------------------------------------------------
 # --- Frontend Serving Endpoints (Unchanged) ---
 # -----------------------------------------------------------
+# --- Frontend Serving Endpoints (Make sure these exist!) ---
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_upload_page():
+    # ... (Keep existing code for upload page)
     upload_file_path = ABSOLUTE_FRONTEND_PATH / "upload.html"
     if not upload_file_path.exists():
         return HTMLResponse(status_code=404, content="<h1>404 Not Found</h1><p>upload.html not found.</p>")
     with open(upload_file_path, 'r', encoding='utf-8') as f:
         return HTMLResponse(content=f.read())
 
+# 👇 RESTORE THIS FUNCTION 👇
 @app.get("/chat", response_class=HTMLResponse)
 async def serve_chat_page():
     chat_file_path = ABSOLUTE_FRONTEND_PATH / "index.html"
@@ -181,6 +186,40 @@ async def serve_chat_page():
     with open(chat_file_path, 'r', encoding='utf-8') as f:
         return HTMLResponse(content=f.read())
 
+# --- API Endpoints ---
+
+@app.post("/chat") # Ensure no trailing slash
+async def handle_chat_message(request: ChatRequest):
+    print(f"Chat Request. PDF Collection: {request.collection_name}")
+
+    try:
+        rag_chain = get_rag_chain_for_collection(request.collection_name)
+        
+        if rag_chain is None:
+            return {"answer": "System is initializing or error occurred."}
+
+        # --- PROCESS HISTORY ---
+        # Convert JSON list to LangChain Message Objects
+        chat_history = []
+        for msg in request.history:
+            if msg['role'] == 'user':
+                chat_history.append(HumanMessage(content=msg['content']))
+            elif msg['role'] == 'assistant':
+                chat_history.append(AIMessage(content=msg['content']))
+        
+        # --- INVOKE CHAIN ---
+        # The new chain expects 'input' and 'chat_history'
+        result = rag_chain.invoke({
+            "input": request.message,
+            "chat_history": chat_history
+        })
+        
+        # 'create_retrieval_chain' returns a dict with keys: input, context, answer
+        return {"answer": result["answer"]}
+        
+    except Exception as e:
+        print(f"Error during RAG chain invocation: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing chat message: {e}")
 # -----------------------------------------------------------
 # --- API Endpoints ---
 # -----------------------------------------------------------

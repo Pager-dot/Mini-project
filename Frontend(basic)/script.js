@@ -73,12 +73,20 @@ const uploadAudioForTranscription = async (audioBlob) => {
 // --- Function to call your RAG backend (gpt-oss) ---
 const callRAGBackend = async (prompt) => {
     try {
-        const response = await fetch('/chat/', {
+        // --- PREPARE HISTORY ---
+        // Fix: Use the full chatHistory. Do not slice it.
+        const historyToSend = chatHistory.map(msg => ({
+            role: msg.role === 'model' ? 'assistant' : 'user',
+            content: msg.parts[0].text
+        }));
+
+        const response = await fetch('/chat', { 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: prompt,
-                collection_name: currentCollectionName 
+                collection_name: currentCollectionName,
+                history: historyToSend 
             })
         });
 
@@ -95,7 +103,6 @@ const callRAGBackend = async (prompt) => {
             chatHistory.push({ role: "model", parts: [{ text: text }] });
             return text;
         } else {
-            // This will now be displayed, thanks to our other fix
             return "Sorry, I received an empty response from the RAG backend.";
         }
 
@@ -104,7 +111,6 @@ const callRAGBackend = async (prompt) => {
         return `Sorry, there was an error connecting to the document AI: ${error.message}`;
     }
 };
-
 // --- Utility function to display messages ---
 const displayMessage = (template, text) => {
     const messageNode = template.cloneNode(true);
