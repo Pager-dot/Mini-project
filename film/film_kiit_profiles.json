@@ -1,0 +1,60 @@
+[
+    {
+        "name": "Prof. Ganeswara Mohapatra",
+        "role": "Associate Dean",
+        "bio": "An Alumni of SRFTI, Kolkata with more than 18yrs of working experience in Bollywood. His Films have won at various National and International Film Festivals.",
+        "profile_url": "https://film.kiit.ac.in/faculty/",
+        "sidebar_details": {
+            "Phone": "+91-9820332699",
+            "Email": "ganeswar.mohapatraffm@kiit.ac.in",
+            "Facebook": "https://www.facebook.com/ganeswara.mohapatra",
+            "LinkedIn": "https://www.linkedin.com/in/ganeswara-mohapatra-40822650/"
+        },
+        "tab_details": {
+            "Biography": "An Alumni of SRFTI, Kolkata with more than 18yrs of working experience in Bollywood. His Films have won at various National and International Film Festivals."
+        },
+        "publications": []
+    },
+    {
+        "name": "Prof. Ajaya Kumar Mishra",
+        "role": "Assistant Professor, Editing",
+        "bio": "An Alumni of Utkal University and BHU with 25yrs of Industry experience including teaching as Film and Video Editor. Certified in Film Appreciation from FTII, Pune.Krantidharahas and Many of his Films have won National and State Film Awards and are highly acclaimed in International Film Festivals.",
+        "profile_url": "https://film.kiit.ac.in/faculty/",
+        "sidebar_details": {
+            "Phone": "+ 91-7008578505, + 91-9861265656",
+            "Email": "ajaya1970@gmail.com, akmishra@kiit.ac.in"
+        },
+        "tab_details": {
+            "Biography": "An Alumni of Utkal University and BHU with 25yrs of Industry experience including teaching as Film and Video Editor. Certified in Film Appreciation from FTII, Pune.Krantidharahas and Many of his Films have won National and State Film Awards and are highly acclaimed in International Film Festivals."
+        },
+        "publications": []
+    },
+    {
+        "name": "Prof. Sushanta Bahinipati",
+        "role": "Assistant Professor, Cinematography",
+        "bio": "Prof. Susanta Bahinipati has won many accolades for his works. Mr Bahinipati’s filmKrantidharahas earned a nomination for screening at prestigious Cannes Film Festival in 2015 and had been nominated for the 12th Chennai International Film Festival.",
+        "profile_url": "https://film.kiit.ac.in/faculty/",
+        "sidebar_details": {
+            "Phone": "+91-9437020613, 7852910395",
+            "Email": "susanta.bahinipatiffm@kiit.ac.in"
+        },
+        "tab_details": {
+            "Biography": "Prof. Susanta Bahinipati has won many accolades for his works. Mr Bahinipati’s filmKrantidharahas earned a nomination for screening at prestigious Cannes Film Festival in 2015 and had been nominated for the 12th Chennai International Film Festival."
+        },
+        "publications": []
+    },
+    {
+        "name": "Mr. Sanjib Kumar Behera",
+        "role": "Faculty Associate, Direction",
+        "bio": "Post Graduate Degree in Direction from SRFTI, KOLKATA, with good industry exposure.",
+        "profile_url": "https://film.kiit.ac.in/faculty/",
+        "sidebar_details": {
+            "Phone": "7848862650",
+            "Email": "sanjib.behera@kiit.ac.in"
+        },
+        "tab_details": {
+            "Biography": "Post Graduate Degree in Direction from SRFTI, KOLKATA, with good industry exposure."
+        },
+        "publications": []
+    }
+]
