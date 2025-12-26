@@ -6,25 +6,44 @@
     <title>Upload PDF</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/style.css"> 
 </head>
 <body class="bg-gray-900 text-white flex h-screen items-center justify-center">
 
+    <div id="loading-widget" class="loading-overlay hidden">
+        <div class="loader-spinner"></div>
+        <h2 class="loading-text">Processing your Document...</h2>
+        <p class="text-gray-400 mt-2 text-sm">Analyzing text and describing images</p>
+    </div>
+
     <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md border border-gray-700">
-        <div class="flex items-center space-x-3 mb-6">
-            <div class="p-2 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full">
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" fill="currentColor" class="bi bi-hexagon-fill" viewBox="0 0 16 16">
-                <path fill-rule="evenodd" d="M8.5.134a1 1 0 0 0-1 0l-6 3.577a1 1 0 0 0-.5.866v6.846a1 1 0 0 0 .5.866l6 3.577a1 1 0 0 0 1 0l6-3.577a1 1 0 0 0 .5-.866V4.577a1 1 0 0 0-.5-.866z"/>
-                </svg>
+        
+        <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8.5.134a1 1 0 0 0-1 0l-6 3.577a1 1 0 0 0-.5.866v6.846a1 1 0 0 0 .5.866l6 3.577a1 1 0 0 0 1 0l6-3.577a1 1 0 0 0 .5-.866V4.577a1 1 0 0 0-.5-.866z"/></svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-100">Upload PDF</h1>
+                    <p id="user-welcome" class="text-xs text-indigo-400">Welcome</p>
+                </div>
             </div>
-            <h1 class="text-2xl font-bold text-gray-100">Upload PDF for RAG</h1>
+
+            <div class="profile-menu-container">
+                <img id="user-avatar" src="" class="w-10 h-10 rounded-full border-2 border-indigo-500 cursor-pointer hover:opacity-80 transition-opacity hidden" alt="Profile">
+                
+                <div id="profile-dropdown" class="dropdown-menu">
+                    <a href="/logout" class="dropdown-item">
+                        <div class="flex items-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                            <span>Logout</span>
+                        </div>
+                    </a>
+                </div>
+            </div>
         </div>
         
-        <p class="text-gray-400 mb-6">Please select a single PDF file to begin your chat session.</p>
+        <p class="text-gray-400 mb-6">Select a PDF to begin analyzing.</p>
 
         <div class="space-y-4">
             <input type="file" id="pdf-input" accept=".pdf" class="hidden"/>
@@ -47,6 +66,5 @@
     </div>
 
     <script src="/static/upload.js"></script>
-
 </body>
 </html>

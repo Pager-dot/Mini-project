@@ -18,15 +18,40 @@ const chatHistory = [{
 
 // This code runs once the chat page DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
+
+    // --- NEW: FETCH USER INFO FOR CHAT ---
+    fetch('/user_info')
+        .then(response => response.json())
+        .then(data => {
+            if (data.name && data.picture) {
+                const avatar = document.getElementById('chat-user-avatar');
+                const dropdown = document.getElementById('chat-profile-dropdown');
+
+                if (avatar && dropdown) {
+                    avatar.src = data.picture;
+                    avatar.classList.remove('hidden');
+
+                    avatar.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        dropdown.classList.toggle('show');
+                    });
+
+                    document.addEventListener('click', () => {
+                        dropdown.classList.remove('show');
+                    });
+                }
+            }
+        })
+        .catch(() => console.log("Not logged in"));
     if (currentCollectionName) {
         // If we loaded a doc, display the welcome message
         const welcomeMessage = `**File Ready!** You are now chatting with \`${currentFileName}\`. Ask me anything about it.`;
         displayMessage(botMessageTemplate, welcomeMessage);
-        
+
         // Also update chat history
         chatHistory.push({ role: "user", parts: [{ text: `I have just uploaded ${currentFileName}.` }] });
         chatHistory.push({ role: "model", parts: [{ text: `Great! I'm ready to answer questions about ${currentFileName}.` }] });
-    
+
     }
 });
 
@@ -60,8 +85,8 @@ const uploadAudioForTranscription = async (audioBlob) => {
             displayMessage(botMessageTemplate, `**⚠️ ${transcribedText}**`);
             return;
         }
-        messageInput.value = transcribedText; 
-        sendMessage(); 
+        messageInput.value = transcribedText;
+        sendMessage();
 
     } catch (error) {
         chatContainer.removeChild(uploadStatus);
@@ -80,13 +105,13 @@ const callRAGBackend = async (prompt) => {
             content: msg.parts[0].text
         }));
 
-        const response = await fetch('/chat', { 
+        const response = await fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: prompt,
                 collection_name: currentCollectionName,
-                history: historyToSend 
+                history: historyToSend
             })
         });
 
@@ -146,7 +171,7 @@ const sendMessage = async () => {
     messageInput.value = '';
 
     const typingIndicator = displayMessage(typingIndicatorTemplate);
-    
+
     let botResponseText;
 
     if (currentCollectionName) {
@@ -159,7 +184,7 @@ const sendMessage = async () => {
     }
 
     chatContainer.removeChild(typingIndicator);
-    
+
     // --- THIS IS THE FIX ---
     displayMessage(botMessageTemplate, botResponseText);
     // --- END THE FIX ---
@@ -183,7 +208,7 @@ voiceBtn.addEventListener('click', async () => {
             mediaRecorder.onstop = () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 stream.getTracks().forEach(track => track.stop());
-                uploadAudioForTranscription(audioBlob); 
+                uploadAudioForTranscription(audioBlob);
             };
 
             mediaRecorder.start();

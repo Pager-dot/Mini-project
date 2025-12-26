@@ -1,82 +1,106 @@
 document.addEventListener('DOMContentLoaded', () => {
+
+    fetch('/user_info')
+        .then(response => response.json())
+        .then(data => {
+            if (data.name) {
+                document.getElementById('user-welcome').textContent = `Welcome, ${data.name}`;
+
+                const avatar = document.getElementById('user-avatar');
+                const dropdown = document.getElementById('profile-dropdown');
+
+                if (data.picture) {
+                    avatar.src = data.picture;
+                    avatar.classList.remove('hidden');
+
+                    // Toggle Dropdown on Click
+                    avatar.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevent click from bubbling
+                        dropdown.classList.toggle('show');
+                    });
+
+                    // Close dropdown if clicking outside
+                    document.addEventListener('click', () => {
+                        dropdown.classList.remove('show');
+                    });
+                }
+            }
+        })
+        .catch(() => console.log("Not logged in"));
+
     const pdfInput = document.getElementById('pdf-input');
     const uploadBtn = document.getElementById('upload-btn');
     const statusMessage = document.getElementById('status-message');
-    const fileNameDisplay = document.getElementById('file-name-display'); 
+    const fileNameDisplay = document.getElementById('file-name-display');
+    const loadingWidget = document.getElementById('loading-widget');
 
-    if (!pdfInput || !uploadBtn || !statusMessage || !fileNameDisplay) {
-        console.error("Upload script error: One or more required elements are missing.");
-        return;
-    }
+    if (!pdfInput || !uploadBtn) return;
 
     pdfInput.addEventListener('change', () => {
         if (pdfInput.files.length > 0) {
-            const fileName = pdfInput.files[0].name;
-            fileNameDisplay.textContent = fileName;
-            statusMessage.textContent = ''; 
-        } else {
-            fileNameDisplay.textContent = 'None';
+            fileNameDisplay.textContent = pdfInput.files[0].name;
+            statusMessage.textContent = '';
         }
     });
 
+
+
+    // --- Status Polling Function ---
+    const pollProcessingStatus = async (collectionName) => {
+        const intervalId = setInterval(async () => {
+            try {
+                const res = await fetch(`/status/${collectionName}`);
+                const data = await res.json();
+
+                if (data.status === 'completed') {
+                    clearInterval(intervalId);
+                    window.location.href = '/chat'; // Redirect to Chat
+                } else if (data.status === 'failed') {
+                    clearInterval(intervalId);
+                    loadingWidget.classList.add('hidden'); // Hide loader
+                    statusMessage.textContent = "❌ Processing Failed on Server.";
+                    uploadBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error("Polling error:", error);
+            }
+        }, 2000); // Check every 2 seconds
+    };
+
     uploadBtn.addEventListener('click', async () => {
-        const file = pdfInput.files[0]; 
-
-        if (!file) {
-            statusMessage.textContent = '⚠️ Please select a file first.';
-            return;
-        }
-
-        if (!file.name.toLowerCase().endsWith(".pdf")) {
-            statusMessage.textContent = '⚠️ Invalid File: Please select a PDF file.';
+        const file = pdfInput.files[0];
+        if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+            statusMessage.textContent = '⚠️ Please select a valid PDF.';
             return;
         }
 
         uploadBtn.disabled = true;
-        statusMessage.textContent = `Uploading ${file.name}...`;
+        statusMessage.textContent = 'Uploading...';
 
         const formData = new FormData();
         formData.append("file", file);
 
         try {
-            const response = await fetch('/upload-pdf/', {
-                method: 'POST',
-                body: formData
-            });
+            const response = await fetch('/upload-pdf/', { method: 'POST', body: formData });
 
             if (!response.ok) {
                 const errorData = await response.json();
-                const errorMessage = errorData.detail || 'Upload failed due to a server error.';
-                statusMessage.textContent = `❌ Upload Failed: ${errorMessage}`;
-                uploadBtn.disabled = false; 
-                return;
+                throw new Error(errorData.detail || 'Upload failed');
             }
-            
+
             const data = await response.json();
-            const collectionName = data.collection_name;
 
-            if (!collectionName) {
-                statusMessage.textContent = `❌ Upload OK, but server didn't return a collection name.`;
-                uploadBtn.disabled = false;
-                return;
-            }
-
-            // --- MODIFICATION: Use sessionStorage ---
-            // This will be remembered as long as the tab is open
-            sessionStorage.setItem('activeCollectionName', collectionName);
+            // Store session data
+            sessionStorage.setItem('activeCollectionName', data.collection_name);
             sessionStorage.setItem('activeFileName', file.name);
-            // --- END MODIFICATION ---
 
-            statusMessage.textContent = '✅ Upload successful! Redirecting to chat...';
-            
-            setTimeout(() => {
-                window.location.href = '/chat'; // Redirect to the chat page
-            }, 1500);
+            // SHOW LOADING WIDGET & START POLLING
+            loadingWidget.classList.remove('hidden');
+            pollProcessingStatus(data.collection_name);
 
         } catch (error) {
-            statusMessage.textContent = '⚠️ Network Error: Could not connect to the server.';
-            console.error('Upload Error:', error);
-            uploadBtn.disabled = false; 
+            statusMessage.textContent = `⚠️ Error: ${error.message}`;
+            uploadBtn.disabled = false;
         }
     });
 });

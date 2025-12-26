@@ -1,5 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse
+import os
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles 
 from pathlib import Path
 import speech_recognition as sr
@@ -9,138 +12,102 @@ import subprocess
 import sys
 from pydantic import BaseModel  
 from contextlib import asynccontextmanager
-import re  # <-- ADDED THIS IMPORT
-from langchain_core.messages import HumanMessage, AIMessage # <--- NEW
+import re
+from langchain_core.messages import HumanMessage, AIMessage 
+from typing import Dict 
 
-# --- NEW: Import RAG components ---
+# --- NEW: Auth Imports ---
+from starlette.middleware.sessions import SessionMiddleware
+from authlib.integrations.starlette_client import OAuth
+
+# --- Import RAG components ---
 from rag_components import load_models, get_rag_chain_for_collection, check_and_ingest_json
 
-# --- NEW: Lifespan event handler ---
+# --- Global Status Tracker ---
+processing_status: Dict[str, str] = {}
+# --- Configuration (LOADED FROM ENV) ---
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+# Optional: Raise an error if keys are missing (Good for debugging)
+if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    raise ValueError("Missing Google Auth credentials in .env file")
+
+# --- Lifespan event handler ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Application startup...")
-    load_models()       # Load AI Models
-    check_and_ingest_json() # <--- NEW: Checks/Creates JSON collection
+    load_models()       
+    check_and_ingest_json() 
     yield
     print("Application shutdown...")
 
-# --- MODIFIED: Initialize FastAPI with the lifespan event ---
 app = FastAPI(lifespan=lifespan)
 
-# --- NEW: Pydantic model for the chat request ---
+# --- NEW: Add Session Middleware ---
+# This allows the server to remember the logged-in user via a cookie
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=False, same_site="lax")
+# --- NEW: Setup OAuth ---
+oauth = OAuth()
+oauth.register(
+    name='google',
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
+
 class ChatRequest(BaseModel):
     message: str
     collection_name: str | None = None
     history: list[dict] = []
 
-# -----------------------------------------------------------
-# CRITICAL: Configure the path to your Frontend directory.
-# -----------------------------------------------------------
 ABSOLUTE_FRONTEND_PATH = Path(__file__).parent.parent / "Frontend(basic)"
 PDF_FOLDER = Path(__file__).parent / "pdf"
 PDF_FOLDER.mkdir(exist_ok=True) 
 
 try:
     app.mount("/static", StaticFiles(directory=ABSOLUTE_FRONTEND_PATH), name="static")
-    print(f"INFO: Successfully mounted Frontend to the /static URL path.")
 except RuntimeError as e:
     print(f"FATAL ERROR: StaticFiles could not find the directory at: {ABSOLUTE_FRONTEND_PATH}")
     raise e 
 
-# -----------------------------------------------------------
-# NEW: Filename Sanitizer Function
-# -----------------------------------------------------------
 def sanitize_name(name: str) -> str:
-    """Cleans a string to be a valid ChromaDB collection name."""
-    # Replace spaces with underscores
     name = name.replace(' ', '_')
-    # Remove any character that is not a letter, number, underscore, hyphen, or period
     name = re.sub(r'[^a-zA-Z0-9._-]', '', name)
-    
-    # Ensure it's at least 3 chars long
-    if len(name) < 3:
-        name = f"doc_{name}"
-        
-    # Ensure it doesn't start or end with a non-alphanumeric char
-    # (ChromaDB requires start/end with [a-zA-Z0-9])
-    if not name[0].isalnum():
-        name = f"c_{name}"
-    if not name[-1].isalnum():
-        name = f"{name}_c"
-
-    # Ensure it's not too long (Chroma's actual limit is 63)
+    if len(name) < 3: name = f"doc_{name}"
+    if not name[0].isalnum(): name = f"c_{name}"
+    if not name[-1].isalnum(): name = f"{name}_c"
     return name[:63]
 
-# -----------------------------------------------------------
-# PDF Processing Pipeline (MODIFIED)
-# -----------------------------------------------------------
-def run_processing_pipeline(pdf_path: Path):
-    """
-    Runs the full PDF processing pipeline (Base, Image-Testo, Emmbed)
-    in the background using subprocess.
-    """
+def run_processing_pipeline(pdf_path: Path, collection_name: str):
+    global processing_status
     try:
-        # --- MODIFIED: Use the sanitizer ---
-        file_stem = sanitize_name(pdf_path.stem)
+        processing_status[collection_name] = "processing"
         
-        # Define the paths for the intermediate and final files
-        # Base.py creates an output dir named after the *original* stem
+        file_stem = collection_name
         original_stem = pdf_path.stem
         output_dir = Path(__file__).parent / original_stem
         base_md_file = output_dir / f"{original_stem}.md"
         described_md_file = output_dir / f"{original_stem}_with_descriptions.md"
-        
-        # Get the path to the current Python executable
         python_executable = sys.executable
         
-        print(f"\n--- [PIPELINE START] Processing: {pdf_path.name} (Collection: {file_stem}) ---")
+        print(f"\n--- [PIPELINE START] Processing: {pdf_path.name} ---")
 
-        # --- 1. Run Base.py --- 
-        # Note: Base.py still uses the *original* PDF path
-        print(f"[TASK 1/3] Running Base.py (PDF to Markdown)...")
-        cmd_base = [python_executable, "Base.py", str(pdf_path)]
-        subprocess.run(cmd_base, check=True, capture_output=True, text=True)
-        print(f"[TASK 1/3] COMPLETE. Created: {base_md_file}")
-
-        # --- 2. Run Image-Testo.py ---
-        print(f"[TASK 2/3] Running Image-Testo.py (Describing Images)...")
-        cmd_image = [
-            python_executable, 
-            "Image-Testo.py", 
-            str(base_md_file),     # input_file
-            str(output_dir),       # image_directory
-            str(described_md_file) # output_file
-        ]
-        subprocess.run(cmd_image, check=True, capture_output=True, text=True)
-        print(f"[TASK 2/3] COMPLETE. Created: {described_md_file}")
-
-        # --- 3. Run Emmbed.py ---
-        # Emmbed.py uses the *sanitized* file_stem as the collection name
-        print(f"[TASK 3/3] Running Emmbed.py (Generating Embeddings)...")
-        cmd_embed = [
-            python_executable,
-            "Emmbed.py",
-            str(described_md_file), # markdown_file
-            file_stem               # collection_name
-        ]
-        subprocess.run(cmd_embed, check=True, capture_output=True, text=True)
-        print(f"[TASK 3/3] COMPLETE. Embedded to collection: '{file_stem}'")
+        subprocess.run([python_executable, "Base.py", str(pdf_path)], check=True, capture_output=True, text=True)
+        subprocess.run([python_executable, "Image-Testo.py", str(base_md_file), str(output_dir), str(described_md_file)], check=True, capture_output=True, text=True)
+        subprocess.run([python_executable, "Emmbed.py", str(described_md_file), file_stem], check=True, capture_output=True, text=True)
         
-        print(f"--- [PIPELINE SUCCESS] Finished processing: {pdf_path.name} ---")
+        print(f"--- [PIPELINE SUCCESS] Finished processing ---")
+        processing_status[collection_name] = "completed"
 
-    except subprocess.CalledProcessError as e:
-        # Log errors if any script fails
-        print(f"!!!!!! [PIPELINE FAILED] for {pdf_path.name} !!!!!!")
-        print(f"COMMAND: {' '.join(e.cmd)}")
-        print(f"STDOUT: {e.stdout}")
-        print(f"STDERR: {e.stderr}")
     except Exception as e:
-        print(f"!!!!!! [PIPELINE FAILED] with unexpected error for {pdf_path.name}: {e} !!!!!!")
+        print(f"!!!!!! [PIPELINE FAILED] {e} !!!!!!")
+        processing_status[collection_name] = "failed"
 
-
-# -----------------------------------------------------------
-# Audio Transcription Utility (Unchanged)
-# -----------------------------------------------------------
 def transcribe_and_translate_audio(audio_content: bytes) -> dict:
     r = sr.Recognizer()
     try:
@@ -150,155 +117,123 @@ def transcribe_and_translate_audio(audio_content: bytes) -> dict:
         wav_buffer.seek(0)
         with sr.AudioFile(wav_buffer) as source:
             audio = r.record(source)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid audio file format: {e}")
-    
-    try:
-        text_transcribed = r.recognize_google(audio, language="en-US")
-        return {"text_english": text_transcribed}
-    except sr.UnknownValueError:
+        return {"text_english": r.recognize_google(audio, language="en-US")}
+    except Exception:
         return {"text_english": "Could not understand audio."}
-    except sr.RequestError as e:
-        raise HTTPException(status_code=503, detail=f"Speech API error: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
-# -----------------------------------------------------------
-# --- Frontend Serving Endpoints (Unchanged) ---
-# -----------------------------------------------------------
-# --- Frontend Serving Endpoints (Make sure these exist!) ---
+# --- AUTH ROUTES ---
+
+@app.get("/login/google")
+async def login_google(request: Request):
+    # FORCE the redirect_uri to match exactly what is in your Google Console
+    # Choose ONE consistency: localhost usually works best.
+    redirect_uri = "http://localhost:8000/auth/google/callback" 
+    
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+@app.get("/auth/google/callback")
+async def auth_google_callback(request: Request):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user = token.get('userinfo')
+        if user:
+            # Store user info in the session (cookie)
+            request.session['user'] = dict(user)
+            # Redirect to the upload page
+            return RedirectResponse(url='/upload')
+    except Exception as e:
+        print(f"Auth Error: {e}")
+        return HTMLResponse(content=f"<h1>Authentication Failed</h1><p>{e}</p>")
+    
+    return RedirectResponse(url='/')
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.pop('user', None)
+    return RedirectResponse(url='/')
+
+# --- APP ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_upload_page():
-    # ... (Keep existing code for upload page)
+async def serve_login_page(request: Request):
+    # Check if user is already logged in
+    user = request.session.get('user')
+    if user:
+        return RedirectResponse(url='/upload')
+
+    login_file_path = ABSOLUTE_FRONTEND_PATH / "index.html"
+    if not login_file_path.exists():
+        return HTMLResponse(status_code=404, content="Login page not found.")
+    with open(login_file_path, 'r', encoding='utf-8') as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/upload", response_class=HTMLResponse)
+async def serve_upload_page(request: Request):
+    # Optional: Protect this route
+    # if not request.session.get('user'):
+    #     return RedirectResponse(url='/')
+        
     upload_file_path = ABSOLUTE_FRONTEND_PATH / "upload.html"
-    if not upload_file_path.exists():
-        return HTMLResponse(status_code=404, content="<h1>404 Not Found</h1><p>upload.html not found.</p>")
     with open(upload_file_path, 'r', encoding='utf-8') as f:
         return HTMLResponse(content=f.read())
 
-# 👇 RESTORE THIS FUNCTION 👇
 @app.get("/chat", response_class=HTMLResponse)
-async def serve_chat_page():
-    chat_file_path = ABSOLUTE_FRONTEND_PATH / "index.html"
-    if not chat_file_path.exists():
-        return HTMLResponse(status_code=404, content="<h1>404 Not Found</h1><p>index.html not found.</p>")
+async def serve_chat_page(request: Request):
+    # Optional: Protect this route
+    # if not request.session.get('user'):
+    #     return RedirectResponse(url='/')
+
+    chat_file_path = ABSOLUTE_FRONTEND_PATH / "chat.html"
     with open(chat_file_path, 'r', encoding='utf-8') as f:
         return HTMLResponse(content=f.read())
 
-# --- API Endpoints ---
-
-@app.post("/chat") # Ensure no trailing slash
-async def handle_chat_message(request: ChatRequest):
-    print(f"Chat Request. PDF Collection: {request.collection_name}")
-
-    try:
-        rag_chain = get_rag_chain_for_collection(request.collection_name)
-        
-        if rag_chain is None:
-            return {"answer": "System is initializing or error occurred."}
-
-        # --- PROCESS HISTORY ---
-        # Convert JSON list to LangChain Message Objects
-        chat_history = []
-        for msg in request.history:
-            if msg['role'] == 'user':
-                chat_history.append(HumanMessage(content=msg['content']))
-            elif msg['role'] == 'assistant':
-                chat_history.append(AIMessage(content=msg['content']))
-        
-        # --- INVOKE CHAIN ---
-        # The new chain expects 'input' and 'chat_history'
-        result = rag_chain.invoke({
-            "input": request.message,
-            "chat_history": chat_history
-        })
-        
-        # 'create_retrieval_chain' returns a dict with keys: input, context, answer
-        return {"answer": result["answer"]}
-        
-    except Exception as e:
-        print(f"Error during RAG chain invocation: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing chat message: {e}")
-# -----------------------------------------------------------
-# --- API Endpoints ---
-# -----------------------------------------------------------
+@app.get("/status/{collection_name}")
+async def get_processing_status(collection_name: str):
+    status = processing_status.get(collection_name, "unknown")
+    return {"status": status}
 
 @app.post("/upload-pdf/")
-async def upload_pdf(
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks()
-):
-    """
-    Receives a PDF, stores it, and triggers the background processing.
-    MODIFIED: Returns the SANITIZED collection_name to the frontend.
-    """
+async def upload_pdf(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+    # ... (Keep existing implementation unchanged)
     try:
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-        
         file_path = PDF_FOLDER / file.filename
-        
         with open(file_path, "wb") as buffer:
             while content := await file.read(1024 * 1024):  
                 buffer.write(content)
-
-        # --- MODIFIED: Get the SANITIZED collection name ---
         collection_name = sanitize_name(Path(file.filename).stem)
-
-        # Start background task to process this file
-        background_tasks.add_task(run_processing_pipeline, file_path)
-        
-        return {
-            "filename": file.filename, 
-            "message": "File upload successful. Processing started in background.", 
-            "path": str(file_path),
-            "collection_name": collection_name  # <-- This is now sanitized
-        }
-        
+        background_tasks.add_task(run_processing_pipeline, file_path, collection_name)
+        return {"filename": file.filename, "message": "File upload successful. Processing started.", "path": str(file_path), "collection_name": collection_name}
     except Exception as e:
-        print(f"Error during file upload: {e}")
         raise HTTPException(status_code=500, detail=f"Could not upload file: {e}")
-
 
 @app.post("/transcribe-audio/")
 async def transcribe_audio(audio_file: UploadFile = File(...)):
-    """Receives an audio file, converts it, and transcribes it (English-only)."""
-    try:
-        audio_content = await audio_file.read()
-        result = transcribe_and_translate_audio(audio_content)
-        return result
-    except HTTPException as h:
-        raise h
-    except Exception as e:
-        print(f"Error during audio transcription: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not process audio: {e}")
+    content = await audio_file.read()
+    return transcribe_and_translate_audio(content)
 
-# --- NEW: Chat Endpoint for RAG ---
-@app.post("/chat/")
+@app.post("/chat")
 async def handle_chat_message(request: ChatRequest):
-    """
-    Receives a message and a collection_name,
-    gets the RAG chain for that collection,
-    and returns the model's answer.
-    """
-    print(f"Received chat request for collection: {request.collection_name}")
     try:
-        # 1. Get the pre-loaded RAG chain for the specific collection
         rag_chain = get_rag_chain_for_collection(request.collection_name)
-        
         if rag_chain is None:
-            return {"answer": "Sorry, I'm still processing that document or I can't find it. Please wait a moment and try again."}
-
-        # 2. Invoke the chain with the user's message
-        answer = rag_chain.invoke(request.message)
-        
-        # --- Print the answer to the terminal for debugging ---
-        print(f"--- RAG Answer: {answer} ---")
-        
-        # 3. Return the answer
-        return {"answer": answer}
-        
+            return {"answer": "Processing document... please wait."}
+        chat_history = []
+        for msg in request.history:
+            if msg['role'] == 'user': chat_history.append(HumanMessage(content=msg['content']))
+            elif msg['role'] == 'assistant': chat_history.append(AIMessage(content=msg['content']))
+        result = rag_chain.invoke({"input": request.message, "chat_history": chat_history})
+        return {"answer": result["answer"]}
     except Exception as e:
-        print(f"Error during RAG chain invocation: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing chat message: {e}")
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# --- Add this to main.py ---
+
+@app.get("/user_info")
+async def get_user_info(request: Request):
+    user = request.session.get('user')
+    if user:
+        return {"name": user.get('name'), "email": user.get('email'), "picture": user.get('picture')}
+    return {"error": "Not logged in"}
