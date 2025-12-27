@@ -3,10 +3,11 @@ import chromadb
 import os
 import json
 import uuid
-from pathlib import Path
-from langchain_core.messages import HumanMessage, AIMessage # <--- NEW
-from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain # <--- NEW
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain # <--- NEW
+import re
+from pathlib import Path  # <--- NEW IMPORT
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from dotenv import load_dotenv
 
 # --- Imports for Ollama Cloud LLM ---
@@ -17,16 +18,19 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.output_parsers import StrOutputParser
 
 # --- 1. Configuration ---
 load_dotenv()
 
-DB_PATH = "chroma_db"
+# --- FIX: Use Absolute Path for Global DB ---
+# This ensures we find 'Backend/chromadb' regardless of where you run main.py from
+BASE_DIR = Path(__file__).parent
+GLOBAL_DB_PATH = BASE_DIR / "chromadb" 
+JSON_COLLECTION_NAME = "static_json_knowledge"
+JSON_DATA_PATH = BASE_DIR / "data.json"
+
 EMBEDDING_MODEL_NAME = "BAAI/bge-large-en-v1.5"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-JSON_COLLECTION_NAME = "static_json_knowledge" # Fixed name for your JSON data
-JSON_DATA_PATH = "data.json" # Path to your json file
 
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 OLLAMA_BASE_URL = "https://ollama.com"
@@ -35,15 +39,14 @@ LLM_MODEL_ID = "gpt-oss:120b"
 # --- 2. Global Variables ---
 llm = None
 embeddings = None
-chroma_client = None
+global_chroma_client = None
 
 def load_models():
-    """Loads models and connects to ChromaDB."""
-    global llm, embeddings, chroma_client
+    """Loads models and connects to the GLOBAL ChromaDB."""
+    global llm, embeddings, global_chroma_client
 
     print("--- Loading RAG models ---")
     
-    # 1. Load LLM
     try:
         llm = ChatOllama(
             base_url=OLLAMA_BASE_URL,
@@ -55,7 +58,6 @@ def load_models():
         print(f"FATAL Error connecting to LLM: {e}")
         exit()
 
-    # 2. Load Embeddings
     try:
         embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL_NAME,
@@ -66,144 +68,156 @@ def load_models():
         print(f"FATAL Error loading embedding model: {e}")
         exit()
 
-    # 3. Connect to Chroma
     try:
-        chroma_client = chromadb.PersistentClient(path=DB_PATH)
-        print(f"Connected to ChromaDB at: {DB_PATH}")
+        # Convert path to string for Chroma
+        print(f"Connecting to Global DB at: {GLOBAL_DB_PATH}")
+        global_chroma_client = chromadb.PersistentClient(path=str(GLOBAL_DB_PATH))
     except Exception as e:
-        print(f"FATAL Error connecting to ChromaDB: {e}")
+        print(f"FATAL Error connecting to Global ChromaDB: {e}")
         exit()
 
     print("--- Models Loaded ---")
 
 def check_and_ingest_json():
-    """
-    Checks if JSON data is already in ChromaDB. 
-    If not, it reads the JSON file and ingests it.
-    """
-    global chroma_client, embeddings
+    """Checks if JSON data is in the Global ChromaDB."""
+    global global_chroma_client, embeddings
     
-    print(f"Checking status of JSON collection: '{JSON_COLLECTION_NAME}'...")
-    
-    # Check if collection exists and has data
+    if not global_chroma_client: return 
+
     try:
-        collection = chroma_client.get_collection(name=JSON_COLLECTION_NAME)
+        # Check if collection exists and has data
+        collection = global_chroma_client.get_collection(name=JSON_COLLECTION_NAME)
         if collection.count() > 0:
-            print(f"✅ Collection '{JSON_COLLECTION_NAME}' already exists with {collection.count()} items. Skipping ingestion.")
+            print(f"✅ Global Collection '{JSON_COLLECTION_NAME}' ready with {collection.count()} items.")
             return
     except Exception:
-        print(f"Collection '{JSON_COLLECTION_NAME}' not found or empty. Starting ingestion...")
+        print(f"Global Collection '{JSON_COLLECTION_NAME}' not found. Ingesting...")
 
-    # Load JSON File
-    if not os.path.exists(JSON_DATA_PATH):
-        print(f"⚠️ Warning: '{JSON_DATA_PATH}' not found. Skipping JSON ingestion.")
+    if not JSON_DATA_PATH.exists():
+        print(f"⚠️ Warning: '{JSON_DATA_PATH}' not found.")
         return
 
     try:
         with open(JSON_DATA_PATH, 'r', encoding='utf-8') as f:
             data = json.load(f)
             
-        print(f"Loaded {len(data)} records from JSON.")
-        
-        # Prepare for Chroma
         documents = []
         metadatas = []
         ids = []
 
         for item in data:
-            # DIRECT MAPPING: We use the 'page_content' field directly.
-            # No need to convert the whole object to text.
             if "page_content" in item:
                 documents.append(item["page_content"])
-                metadatas.append(item.get("metadata", {})) # Use existing metadata
+                metadatas.append(item.get("metadata", {}))
                 ids.append(str(uuid.uuid4()))
         
-        if not documents:
-            print("No valid 'page_content' fields found in JSON.")
-            return
-
-        # Embed and Store
-        # We use the LangChain wrapper to simplify embedding generation
-        vector_store = Chroma(
-            client=chroma_client,
-            collection_name=JSON_COLLECTION_NAME,
-            embedding_function=embeddings,
-        )
-        
-        vector_store.add_texts(texts=documents, metadatas=metadatas, ids=ids)
-        print(f"✅ Successfully ingested {len(documents)} items into '{JSON_COLLECTION_NAME}'.")
+        if documents:
+            vector_store = Chroma(
+                client=global_chroma_client,
+                collection_name=JSON_COLLECTION_NAME,
+                embedding_function=embeddings,
+            )
+            # Add in batches to avoid limits
+            batch_size = 100
+            for i in range(0, len(documents), batch_size):
+                vector_store.add_texts(
+                    texts=documents[i:i+batch_size], 
+                    metadatas=metadatas[i:i+batch_size], 
+                    ids=ids[i:i+batch_size]
+                )
+            print(f"✅ Ingested {len(documents)} items into Global DB.")
 
     except Exception as e:
         print(f"❌ Error during JSON ingestion: {e}")
 
-def get_hybrid_retriever(pdf_collection_name: str = None):
+def get_hybrid_retriever(shared_users_db_path: str, unique_collection_name: str = None):
     """
-    Returns a retriever that searches BOTH the static JSON collection
-    AND the specific PDF collection (if provided).
+    Returns a retriever that searches:
+    1. The Global JSON collection (Static Knowledge).
+    2. The User's Specific Collection within the Shared DB (if provided).
     """
-    global chroma_client, embeddings
+    global global_chroma_client, embeddings
     
     retrievers = []
 
-    # 1. Always include the JSON retriever
+    # 1. Global JSON Retriever
     try:
         json_store = Chroma(
-            client=chroma_client,
+            client=global_chroma_client,
             collection_name=JSON_COLLECTION_NAME,
             embedding_function=embeddings,
         )
-        # Search JSON data
         retrievers.append(json_store.as_retriever(search_kwargs={"k": 3}))
     except Exception as e:
-        print(f"Error accessing JSON collection: {e}")
+        print(f"Error accessing Global JSON: {e}")
 
-    # 2. Include PDF retriever if a valid collection name is provided
-    if pdf_collection_name:
+    # 2. User Specific Collection in Shared DB (Skip if Guest/None)
+    if shared_users_db_path and unique_collection_name:
         try:
-            # Check if collection actually exists in Chroma
-            existing_collections = [c.name for c in chroma_client.list_collections()]
-            if pdf_collection_name in existing_collections:
-                pdf_store = Chroma(
-                    client=chroma_client,
-                    collection_name=pdf_collection_name,
+            shared_client = chromadb.PersistentClient(path=str(shared_users_db_path))
+            existing_collections = [c.name for c in shared_client.list_collections()]
+            
+            if unique_collection_name in existing_collections:
+                user_store = Chroma(
+                    client=shared_client,
+                    collection_name=unique_collection_name,
                     embedding_function=embeddings,
                 )
-                # Search PDF data
-                retrievers.append(pdf_store.as_retriever(search_kwargs={"k": 3}))
+                retrievers.append(user_store.as_retriever(search_kwargs={"k": 3}))
             else:
-                print(f"Requested PDF collection '{pdf_collection_name}' not found.")
+                # This is normal for a fresh upload or first query
+                print(f"Note: User collection '{unique_collection_name}' not found yet.")
         except Exception as e:
-            print(f"Error accessing PDF collection: {e}")
+            print(f"Error accessing Shared DB: {e}")
 
-    # 3. Create a combined retriever function
+    # 3. Combine
+    if not retrievers:
+        # Fallback if everything fails
+        return None
+
     def combined_retrieval(query):
         combined_docs = []
-        for retriever in retrievers:
-            docs = retriever.invoke(query)
-            combined_docs.extend(docs)
+        for r in retrievers:
+            try:
+                docs = r.invoke(query)
+                combined_docs.extend(docs)
+            except Exception as e:
+                print(f"Retriever error: {e}")
         return combined_docs
 
     return RunnableLambda(combined_retrieval)
-def get_rag_chain_for_collection(collection_name: str = None):
-    """
-    Builds a History-Aware RAG chain.
-    """
+
+def delete_user_collections(shared_db_path: str, user_id: str):
+    try:
+        client = chromadb.PersistentClient(path=shared_db_path)
+        collections = client.list_collections()
+        safe_uid = re.sub(r'[^a-zA-Z0-9]', '', user_id)
+        prefix = f"u_{safe_uid}_"
+        count = 0
+        for col in collections:
+            if col.name.startswith(prefix):
+                client.delete_collection(col.name)
+                count += 1
+        print(f"Deleted {count} collections for user {user_id}.")
+    except Exception as e:
+        print(f"Error cleaning up user collections: {e}")
+
+def get_rag_chain_for_collection(shared_users_db_path: str, unique_collection_name: str = None):
     global llm
 
     if not llm:
         print("Models not loaded.")
         return None
 
-    # 1. Get the Hybrid Retriever (JSON + PDF)
-    retriever = get_hybrid_retriever(collection_name)
+    retriever = get_hybrid_retriever(shared_users_db_path, unique_collection_name)
+    
+    if not retriever:
+        # Fallback if no data sources are available
+        return None
 
-    # 2. Define "Contextualize Question" Prompt
-    # This prompt helps the AI rewrite the user's question to be standalone
-    # e.g., "Give me her email" -> "Give me Laxman Soren's email"
     contextualize_q_system_prompt = """Given a chat history and the latest user question 
     which might reference context in the chat history, formulate a standalone question 
-    which can be understood without the chat history. Do NOT answer the question, 
-    just reformulate it if needed and otherwise return it as is."""
+    which can be understood without the chat history. Do NOT answer the question."""
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages(
         [
@@ -213,20 +227,17 @@ def get_rag_chain_for_collection(collection_name: str = None):
         ]
     )
 
-    # 3. Create History-Aware Retriever
-    # This chain will: Take Input + History -> Rewrite Question -> Fetch Docs
     history_aware_retriever = create_history_aware_retriever(
         llm, retriever, contextualize_q_prompt
     )
 
-    # 4. Define "Answer Question" Prompt
-    qa_system_prompt = """You are an assistant for question-answering tasks. 
-    Use the following pieces of retrieved context to answer the question. 
-    If you don't know the answer, just say that you don't know. 
-    Keep the answer concise.
-
-    CONTEXT:
-    {context}"""
+    qa_system_prompt = """You are an AI assistant. Use the retrieved context to answer the question. 
+    
+    Context:
+    {context}
+    
+    If the context doesn't contain the answer, say "I don't have that information in my documents."
+    """
 
     qa_prompt = ChatPromptTemplate.from_messages(
         [
@@ -236,7 +247,6 @@ def get_rag_chain_for_collection(collection_name: str = None):
         ]
     )
 
-    # 5. Create the Final RAG Chain
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
     rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
     

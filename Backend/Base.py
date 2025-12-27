@@ -2,40 +2,44 @@ from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.output import text_from_rendered
 from pathlib import Path
-from io import BytesIO # Used to save the Pillow Image object as binary data
-import sys # Added to read command-line arguments
+from io import BytesIO
+import sys
 
-# Get PDF filename from the command-line argument
+# --- Configuration ---
 if len(sys.argv) < 2:
     print("Error: No PDF file path provided.")
-    print("Usage: python Base.py <path_to_pdf_file>")
+    print("Usage: python Base.py <path_to_pdf_file> [optional_output_dir]")
     sys.exit(1)
     
-pdf_filename = sys.argv[1] # e.g., "pdf/2501.17887v1.pdf"
+pdf_filename = sys.argv[1]
+pdf_path_obj = Path(pdf_filename)
 
-# creating output dir with same name as the PDF stem
-# e.g., "pdf/2501.17887v1.pdf" -> "2501.17887v1"
-output_dir_name = Path(pdf_filename).stem 
+# Determine Output Directory
+# If a second argument is provided, use it as the output directory.
+# Otherwise, default to a folder named after the PDF stem in the same location.
+if len(sys.argv) >= 3:
+    output_dir = Path(sys.argv[2])
+else:
+    output_dir = pdf_path_obj.parent / pdf_path_obj.stem
 
-# 1. Setup Converter and Process PDF
+# Create the output directory
+output_dir.mkdir(parents=True, exist_ok=True)
+print(f"Output directory set to: {output_dir}")
+
+# --- 1. Setup Converter and Process PDF ---
 print(f"Initializing Marker converter for: {pdf_filename}")
 converter = PdfConverter(
     artifact_dict=create_model_dict(),
 )
 rendered = converter(pdf_filename)
 
-# 2. Extract Text, Metadata, and Images
+# --- 2. Extract Text and Images ---
 print("Extracting text and images...")
 text, _, images = text_from_rendered(rendered)
 
-# 3. Create an output directory for the MD file and images
-# This will create a directory in the same folder where the script is run
-output_dir = Path(output_dir_name)
-output_dir.mkdir(exist_ok=True)
-print(f"Created output directory: {output_dir}")
-
-# 4. Save the Markdown text file
-md_filename = output_dir / f"{output_dir_name}.md"
+# --- 3. Save the Markdown text file ---
+# We use the folder name as the filename (e.g., folder "doc1" -> "doc1.md")
+md_filename = output_dir / f"{output_dir.name}.md"
 
 try:
     with open(md_filename, "w", encoding="utf-8") as f:
@@ -44,7 +48,7 @@ try:
 except Exception as e:
     print(f"An error occurred while writing the MD file: {e}")
 
-# 5. Save the image files
+# --- 4. Save the image files ---
 print(f"\nSaving {len(images)} images...")
 for filename, image_object in images.items():
     image_path = output_dir / filename
@@ -52,18 +56,15 @@ for filename, image_object in images.items():
     byte_io = BytesIO()
     
     try:
-        # Determine image format from suffix (e.g., .jpeg, .png)
+        # Determine image format
         img_format = image_path.suffix.lstrip('.').upper()
-        if img_format == 'JPEG':
-            img_format = 'JPEG'
-        elif img_format == 'JPG':
-            img_format = 'JPEG'
-        elif img_format == 'PNG':
-            img_format = 'PNG'
-        else:
+        if img_format not in ['JPEG', 'JPG', 'PNG']:
             print(f"Warning: Unknown image format '{img_format}' for {filename}. Defaulting to PNG.")
             img_format = 'PNG'
             image_path = image_path.with_suffix('.png')
+
+        # Fix for JPG/JPEG mapping
+        if img_format == 'JPG': img_format = 'JPEG'
 
         image_object.save(byte_io, format=img_format)
         image_data = byte_io.getvalue()
@@ -72,6 +73,6 @@ for filename, image_object in images.items():
             f.write(image_data)
         
     except Exception as e:
-        print(f"An error occurred while writing image {filename} (format: {img_format}): {e}")
+        print(f"An error occurred while writing image {filename}: {e}")
 
-print(f"Image saving complete for {output_dir_name}.")
+print(f"Processing complete for {pdf_filename}.")

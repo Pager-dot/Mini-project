@@ -3,98 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chatbot Interface</title>
+    <title>Chat - KIIT RAG</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="bg-gray-900 text-white flex flex-col h-screen">
+<body class="bg-gray-900 text-white flex flex-col h-screen overflow-hidden font-inter">
 
-    <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 flex items-center justify-between shadow-lg">
+    <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 flex items-center justify-between shadow-lg z-10">
         <div class="flex items-center space-x-3">
-            <div class="p-2 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full">
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" fill="currentColor" class="bi bi-hexagon-fill" viewBox="0 0 16 16">
-                <path fill-rule="evenodd" d="M8.5.134a1 1 0 0 0-1 0l-6 3.577a1 1 0 0 0-.5.866v6.846a1 1 0 0 0 .5.866l6 3.577a1 1 0 0 0 1 0l6-3.577a1 1 0 0 0 .5-.866V4.577a1 1 0 0 0-.5-.866z"/>
+            <div class="p-2 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full shadow-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-hexagon-fill" viewBox="0 0 16 16">
+                    <path fill-rule="evenodd" d="M8.5.134a1 1 0 0 0-1 0l-6 3.577a1 1 0 0 0-.5.866v6.846a1 1 0 0 0 .5.866l6 3.577a1 1 0 0 0 1 0l6-3.577a1 1 0 0 0 .5-.866V4.577a1 1 0 0 0-.5-.866z"/>
                 </svg>
             </div>
-            <h1 class="text-xl font-bold text-gray-100">RAG Demo</h1>
+            <h1 class="text-xl font-bold text-gray-100 tracking-wide">RAG Demo</h1>
         </div>
 
-        <div class="profile-menu-container">
-            <img id="chat-user-avatar" src="" class="w-10 h-10 rounded-full border-2 border-indigo-500 cursor-pointer hidden" alt="Profile">
-            
-            <div id="chat-profile-dropdown" class="dropdown-menu">
-                 <a href="/logout" class="dropdown-item">
-                    <div class="flex items-center space-x-2">
+        <div class="flex items-center gap-4">
+            <div class="text-right hidden sm:block">
+                <p class="text-sm text-gray-400">Logged in as</p>
+                <p id="user-name" class="text-sm font-semibold text-white">Guest</p>
+            </div>
+
+            <div class="profile-menu-container relative">
+                <img id="chat-user-avatar" src="https://ui-avatars.com/api/?name=Guest&background=6366f1&color=fff" class="w-10 h-10 rounded-full border-2 border-indigo-500 cursor-pointer hover:scale-105 transition-transform" alt="Profile">
+                
+                <div id="chat-profile-dropdown" class="dropdown-menu hidden absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 overflow-hidden">
+                     <button id="end-chat-btn" class="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-gray-700 hover:text-red-300 transition-colors flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-                        <span>Logout</span>
-                    </div>
-                </a>
+                        End Chat & Logout
+                    </button>
+                </div>
             </div>
         </div>
     </header>
 
-    <main id="chat-container" class="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
+    <main id="chat-container" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth custom-scrollbar">
         <div class="flex items-start gap-4">
-            <div class="flex-shrink-0 w-10 h-10 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+            <div class="flex-shrink-0 w-10 h-10 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold shadow-lg">
                 AI
             </div>
-            <div class="bg-gray-800 rounded-2xl p-4 max-w-lg shadow-md">
-                <p class="text-gray-300">Hello! I'm ready to answer questions about your document.</p>
-            </div>
-        </div>
-        
-        <div id="user-message-template" class="flex items-start gap-4 justify-end hidden">
-            <div class="bg-indigo-600 rounded-2xl p-4 max-w-lg shadow-md">
-                <p class="text-white"></p>
-            </div>
-            <div class="flex-shrink-0 w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center text-gray-300 font-bold">
-                You
-            </div>
-        </div>
-
-        <div id="bot-message-template" class="flex items-start gap-4 hidden">
-            <div class="flex-shrink-0 w-10 h-10 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold">
-                AI
-            </div>
-            <div class="bg-gray-800 rounded-2xl p-4 max-w-lg shadow-md">
-                <p class="text-gray-300"></p>
-            </div>
-        </div>
-        
-        <div id="typing-indicator-template" class="flex items-start gap-4 hidden">
-            <div class="flex-shrink-0 w-10 h-10 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold">
-                AI
-            </div>
-            <div class="bg-gray-800 rounded-2xl p-4 shadow-md">
-                <div class="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
+            <div class="bg-gray-800 border border-gray-700 rounded-2xl p-4 max-w-2xl shadow-md">
+                <p class="text-gray-200">Hello! I'm ready to answer questions about your document.</p>
             </div>
         </div>
     </main>
 
-    <footer class="bg-gray-800/70 backdrop-blur-sm border-t border-gray-700 p-4">
-        <div class="max-w-3xl mx-auto">
-            <div class="bg-gray-900 rounded-xl flex items-center p-2 border border-gray-700 focus-within:ring-2 focus-within:ring-indigo-500 transition-shadow duration-300">
-                        
-                <input type="text" id="message-input" placeholder="Type your message..." class="flex-1 bg-transparent px-4 py-2 text-gray-200 placeholder-gray-500 focus:outline-none">
+    <footer class="bg-gray-800/70 backdrop-blur-md border-t border-gray-700 p-4">
+        <div class="max-w-4xl mx-auto">
+            <div class="bg-gray-900 rounded-xl flex items-center p-2 border border-gray-700 focus-within:ring-2 focus-within:ring-indigo-500/50 transition-all shadow-lg">
                 
-                <button id="voice-btn" class="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-full transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" class="flex-1 bg-transparent px-4 py-3 text-gray-100 placeholder-gray-500 focus:outline-none">
+                
+                <button id="voice-btn" class="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors" title="Use Microphone">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
                 </button>
 
-                <button id="send-btn" class="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-500 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed ml-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-send"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                <button id="send-btn" class="p-2 ml-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors shadow-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
                 </button>
             </div>
             <p class="text-xs text-center text-gray-500 mt-2">Powered by RAG Pipeline</p>
         </div>
     </footer>
 
+    <div id="user-message-template" class="hidden flex items-start gap-4 justify-end">
+        <div class="bg-indigo-600 rounded-2xl rounded-tr-sm p-4 max-w-2xl shadow-md text-white">
+            <p></p>
+        </div>
+        <div class="flex-shrink-0 w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center text-gray-300 font-bold border border-gray-600">
+            You
+        </div>
+    </div>
+
+    <div id="bot-message-template" class="hidden flex items-start gap-4">
+        <div class="flex-shrink-0 w-10 h-10 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold shadow-lg">
+            AI
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-2xl rounded-tl-sm p-4 max-w-2xl shadow-md text-gray-200 prose prose-invert">
+            <p></p>
+        </div>
+    </div>
+    
+    <div id="typing-indicator-template" class="hidden flex items-start gap-4">
+        <div class="flex-shrink-0 w-10 h-10 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold shadow-lg">
+            AI
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-2xl rounded-tl-sm p-4 shadow-md">
+            <div class="typing-indicator flex gap-1">
+                <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
+                <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100"></span>
+                <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200"></span>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/script.js"></script>
+    
+    <script>
+        // --- 1. POPUP Logic (Tab Close) ---
+        window.addEventListener('beforeunload', function (e) {
+            e.preventDefault();
+            e.returnValue = ''; // Shows generic browser warning
+            navigator.sendBeacon('/end_session'); // Silent cleanup in background
+        });
+
+        // --- 2. END CHAT Button Logic ---
+        document.getElementById('end-chat-btn').addEventListener('click', async () => {
+            if(confirm("Are you sure you want to end the chat? This will delete your session data.")) {
+                await fetch('/end_session', {method: 'POST'});
+                window.location.href = '/';
+            }
+        });
+
+        // --- 3. Dropdown Toggle Logic ---
+        const avatar = document.getElementById('chat-user-avatar');
+        const dropdown = document.getElementById('chat-profile-dropdown');
+        
+        avatar.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
+        });
+
+        document.addEventListener('click', () => {
+            dropdown.classList.add('hidden');
+        });
+    </script>
 </body>
 </html>

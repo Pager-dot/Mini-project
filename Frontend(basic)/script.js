@@ -7,228 +7,147 @@ const userMessageTemplate = document.getElementById('user-message-template');
 const botMessageTemplate = document.getElementById('bot-message-template');
 const typingIndicatorTemplate = document.getElementById('typing-indicator-template');
 
-// Load from sessionStorage on page load
 let currentCollectionName = sessionStorage.getItem('activeCollectionName') || null;
-let currentFileName = sessionStorage.getItem('activeFileName') || null;
 
-const chatHistory = [{
-    role: "model",
-    parts: [{ text: "You are a helpful and friendly AI assistant. Upload a PDF to start asking questions about it." }]
-}];
-
-// This code runs once the chat page DOM is loaded
+// --- 1. FETCH USER INFO ---
 document.addEventListener('DOMContentLoaded', () => {
-
-    // --- NEW: FETCH USER INFO FOR CHAT ---
     fetch('/user_info')
         .then(response => response.json())
         .then(data => {
-            if (data.name && data.picture) {
-                const avatar = document.getElementById('chat-user-avatar');
-                const dropdown = document.getElementById('chat-profile-dropdown');
+            if (data.name) {
+                // Update Name in Header
+                const nameDisplay = document.getElementById('user-name');
+                if(nameDisplay) nameDisplay.textContent = data.name;
 
-                if (avatar && dropdown) {
-                    avatar.src = data.picture;
-                    avatar.classList.remove('hidden');
-
-                    avatar.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        dropdown.classList.toggle('show');
-                    });
-
-                    document.addEventListener('click', () => {
-                        dropdown.classList.remove('show');
-                    });
+                // Update Avatar
+                if (data.picture) {
+                    const avatar = document.getElementById('chat-user-avatar');
+                    if (avatar) avatar.src = data.picture;
                 }
             }
         })
-        .catch(() => console.log("Not logged in"));
-    if (currentCollectionName) {
-        // If we loaded a doc, display the welcome message
-        const welcomeMessage = `**File Ready!** You are now chatting with \`${currentFileName}\`. Ask me anything about it.`;
-        displayMessage(botMessageTemplate, welcomeMessage);
-
-        // Also update chat history
-        chatHistory.push({ role: "user", parts: [{ text: `I have just uploaded ${currentFileName}.` }] });
-        chatHistory.push({ role: "model", parts: [{ text: `Great! I'm ready to answer questions about ${currentFileName}.` }] });
-
-    }
+        .catch(() => console.log("Not logged in (Guest Mode)"));
 });
 
-// --- Voice Recording State and Objects ---
-let mediaRecorder;
-let audioChunks = [];
-let isRecording = false;
-
-// Function to handle the upload of the recorded audio
-const uploadAudioForTranscription = async (audioBlob) => {
-    const uploadStatus = displayMessage(botMessageTemplate, `**Transcribing Audio...**`);
-    const formData = new FormData();
-    formData.append("audio_file", audioBlob, "user_recording.webm");
-
-    try {
-        const response = await fetch('/transcribe-audio/', {
-            method: 'POST',
-            body: formData
-        });
-        chatContainer.removeChild(uploadStatus);
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Transcription server error.');
-        }
-
-        const data = await response.json();
-        const transcribedText = data.text_english;
-
-        if (!transcribedText || transcribedText.includes("Could not understand audio")) {
-            displayMessage(botMessageTemplate, `**⚠️ ${transcribedText}**`);
-            return;
-        }
-        messageInput.value = transcribedText;
-        sendMessage();
-
-    } catch (error) {
-        chatContainer.removeChild(uploadStatus);
-        displayMessage(botMessageTemplate, `**⚠️ Transcription Error:** ${error.message}`);
-        console.error('Transcription Upload Error:', error);
+// --- 2. DISPLAY MESSAGE ---
+function displayMessage(template, text, isUser = false) {
+    const clone = template.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.classList.remove('hidden'); // Remove hidden class
+    
+    // Find text container
+    const textContainer = clone.querySelector('p');
+    
+    if (isUser) {
+        textContainer.textContent = text;
+    } else {
+        // Parse Markdown for bot
+        textContainer.innerHTML = marked.parse(text);
     }
-};
+    
+    chatContainer.appendChild(clone);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    return clone;
+}
 
-// --- Function to call your RAG backend (gpt-oss) ---
-const callRAGBackend = async (prompt) => {
+// --- 3. SEND MESSAGE ---
+async function sendMessage() {
+    const message = messageInput.value.trim();
+    if (!message) return;
+
+    // Show User Message
+    displayMessage(userMessageTemplate, message, true);
+    messageInput.value = '';
+
+    // Show Typing Indicator
+    const typingClone = typingIndicatorTemplate.cloneNode(true);
+    typingClone.removeAttribute('id');
+    typingClone.classList.remove('hidden');
+    chatContainer.appendChild(typingClone);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+
     try {
-        // --- PREPARE HISTORY ---
-        // Fix: Use the full chatHistory. Do not slice it.
-        const historyToSend = chatHistory.map(msg => ({
-            role: msg.role === 'model' ? 'assistant' : 'user',
-            content: msg.parts[0].text
-        }));
-
         const response = await fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                message: prompt,
-                collection_name: currentCollectionName,
-                history: historyToSend
+                message: message,
+                collection_name: currentCollectionName, 
+                history: [] 
             })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || `Server error ${response.status}`);
-        }
+        // Remove Typing Indicator
+        chatContainer.removeChild(typingClone);
 
+        if (!response.ok) throw new Error('Network response was not ok');
+        
         const data = await response.json();
-        const text = data.answer;
-
-        if (text) {
-            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-            chatHistory.push({ role: "model", parts: [{ text: text }] });
-            return text;
-        } else {
-            return "Sorry, I received an empty response from the RAG backend.";
-        }
+        displayMessage(botMessageTemplate, data.answer);
 
     } catch (error) {
-        console.error("Error calling RAG backend:", error);
-        return `Sorry, there was an error connecting to the document AI: ${error.message}`;
+        if(chatContainer.contains(typingClone)) chatContainer.removeChild(typingClone);
+        displayMessage(botMessageTemplate, "Sorry, I couldn't reach the server.");
+        console.error(error);
     }
-};
-// --- Utility function to display messages ---
-const displayMessage = (template, text) => {
-    const messageNode = template.cloneNode(true);
-    messageNode.removeAttribute('id');
-    messageNode.classList.remove('hidden');
-
-    if (text) {
-        const textElement = messageNode.querySelector('p');
-
-        // --- THIS IS THE FIX ---
-        // Check if this is a bot message template
-        if (template.id === 'bot-message-template') {
-            // If it's a bot, parse the text as Markdown
-            // marked.parse() safely converts Markdown to HTML
-            textElement.innerHTML = marked.parse(text);
-        } else {
-            // Otherwise (like a user message), insert it as plain text
-            textElement.textContent = text;
-        }
-        // --- END OF FIX ---
-    }
-
-    chatContainer.appendChild(messageNode);
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-    return messageNode;
 }
-// --- sendMessage (This now works correctly) ---
-const sendMessage = async () => {
-    const messageText = messageInput.value.trim();
-    if (messageText === '') return;
 
-    displayMessage(userMessageTemplate, messageText);
-    messageInput.value = '';
+// --- 4. MICROPHONE LOGIC ---
+let isRecording = false;
+let mediaRecorder;
+let audioChunks = [];
 
-    const typingIndicator = displayMessage(typingIndicatorTemplate);
-
-    let botResponseText;
-
-    if (currentCollectionName) {
-        // If we have a PDF loaded, use the RAG backend
-        console.log(`Sending to RAG backend with collection: ${currentCollectionName}`);
-        botResponseText = await callRAGBackend(messageText);
-    } else {
-        // If no PDF is loaded, prompt the user.
-        botResponseText = "Please upload a PDF document first to ask questions about it.";
-    }
-
-    chatContainer.removeChild(typingIndicator);
-
-    // --- THIS IS THE FIX ---
-    displayMessage(botMessageTemplate, botResponseText);
-    // --- END THE FIX ---
-};
-
-// --- Voice Button Event Listener ---
 voiceBtn.addEventListener('click', async () => {
     if (isRecording) {
-        voiceBtn.style.color = '';
+        voiceBtn.style.color = '#9ca3af'; // Reset color
         isRecording = false;
-        if (mediaRecorder) {
-            mediaRecorder.stop();
-        }
+        if (mediaRecorder) mediaRecorder.stop();
     } else {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm; codecs=opus' });
+            mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
 
-            mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
-            mediaRecorder.onstop = () => {
+            mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+            
+            mediaRecorder.onstop = async () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                stream.getTracks().forEach(track => track.stop());
-                uploadAudioForTranscription(audioBlob);
+                stream.getTracks().forEach(track => track.stop()); // Stop mic
+                
+                const formData = new FormData();
+                formData.append("audio_file", audioBlob, "recording.webm");
+                
+                // Show temp message
+                const loadingMsg = displayMessage(botMessageTemplate, "*Transcribing audio...*");
+                
+                const res = await fetch("/transcribe-audio/", { method: "POST", body: formData });
+                const data = await res.json();
+                
+                chatContainer.removeChild(loadingMsg);
+                
+                if (data.text_english) {
+                    messageInput.value = data.text_english;
+                    sendMessage();
+                } else {
+                    displayMessage(botMessageTemplate, "Could not understand audio.");
+                }
             };
 
             mediaRecorder.start();
-            voiceBtn.style.color = 'red';
+            voiceBtn.style.color = '#ef4444'; // Red
             isRecording = true;
-            //for debugging
-            //displayMessage(botMessageTemplate, "**Recording...** Click again to stop. Please speak clearly in English.");
         } catch (error) {
-            console.error('Microphone access denied or error:', error);
-            displayMessage(botMessageTemplate, `**Error:** Could not access the microphone. ${error.message}`);
+            console.error(error);
+            alert("Microphone access denied.");
         }
     }
 });
 
-// --- Final Event Listeners ---
+// --- 5. EVENT LISTENERS ---
 sendBtn.addEventListener('click', sendMessage);
-
-messageInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-        event.preventDefault();
+messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
         sendMessage();
     }
 });
