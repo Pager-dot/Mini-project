@@ -1,3 +1,0 @@
-invalid type: string "C:\\Users\\pager_dot\\Desktop\\Mini-project\\Backend\\users_data\\temp_115541350072300031492_Paritoshs_Resumes\\temp_115541350072300031492_Paritoshs_Resumes_with_descriptions.md", expected i64oolean
-
-Established the core RAG stack, vectorizing enhanced documents with bge-large-en-v1.5 and storing them in ChromaDB for efficient retrieval and response generation via gpt-oss:120
