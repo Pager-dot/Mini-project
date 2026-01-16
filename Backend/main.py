@@ -1,7 +1,6 @@
 import os
 import shutil
 from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles 
@@ -22,11 +21,17 @@ from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 
 # --- RAG Components ---
-from rag_components import load_models, get_rag_chain_for_collection, check_and_ingest_json, delete_user_collections
+from Backend.rag_components import (
+    load_models,
+    get_rag_chain_for_collection,
+    check_and_ingest_json,
+    delete_user_collections
+)
 
 # --- Global Status Tracker ---
 processing_status: Dict[str, str] = {}
 
+load_dotenv(find_dotenv())
 # --- Configuration ---
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
