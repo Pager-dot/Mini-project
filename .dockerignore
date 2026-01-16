@@ -1,0 +1,7 @@
+.env
+Backend/venv
+.vscode
+.github
+
+Backend/chromadb
+Backend/users_data
