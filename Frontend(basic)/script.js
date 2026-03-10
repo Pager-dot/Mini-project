@@ -69,6 +69,7 @@ async function sendMessage() {
     try {
         const response = await fetch('/chat', {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: message,
