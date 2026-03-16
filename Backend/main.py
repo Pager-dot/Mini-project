@@ -39,7 +39,7 @@ if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
 BASE_DIR = Path(__file__).parent
 USERS_DATA_FOLDER = BASE_DIR / "users_data"
 USERS_CHROMA_DB_PATH = USERS_DATA_FOLDER / "chromadb" 
-ABSOLUTE_FRONTEND_PATH = BASE_DIR.parent / "Frontend(basic)"
+ABSOLUTE_FRONTEND_PATH = BASE_DIR.parent / "Frontend"
 
 # Verify Frontend Path Exists (Debug Check)
 if not ABSOLUTE_FRONTEND_PATH.exists():
