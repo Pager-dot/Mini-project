@@ -1,26 +1,26 @@
-const chatContainer = document.getElementById('chat-container');
-const messageInput = document.getElementById('message-input');
-const sendBtn = document.getElementById('send-btn');
-const voiceBtn = document.getElementById('voice-btn');
-
-const userMessageTemplate = document.getElementById('user-message-template');
-const botMessageTemplate = document.getElementById('bot-message-template');
+// ── ELEMENTS ──────────────────────────────────────────────────────────────────
+const chatContainer           = document.getElementById('chat-container');
+const messageInput            = document.getElementById('message-input');
+const sendBtn                 = document.getElementById('send-btn');
+const voiceBtn                = document.getElementById('voice-btn');
+const userMessageTemplate     = document.getElementById('user-message-template');
+const botMessageTemplate      = document.getElementById('bot-message-template');
 const typingIndicatorTemplate = document.getElementById('typing-indicator-template');
 
 let currentCollectionName = sessionStorage.getItem('activeCollectionName') || null;
 
-// Helper: current time string
+// ── HELPERS ────────────────────────────────────────────────────────────────────
 function timeNow() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// --- 1. FETCH USER INFO ---
+// ── 1. FETCH USER INFO ─────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   fetch('/user_info')
     .then(r => r.json())
     .then(data => {
       if (data.name) {
-        const strip = document.getElementById('user-strip');
+        const strip  = document.getElementById('user-strip');
         const nameEl = document.getElementById('user-name');
         if (strip)  { strip.style.display = 'flex'; strip.classList.remove('hidden'); }
         if (nameEl) nameEl.textContent = data.name;
@@ -33,20 +33,21 @@ document.addEventListener('DOMContentLoaded', () => {
     .catch(() => {});
 });
 
-// --- 2. DISPLAY MESSAGE ---
+// ── 2. DISPLAY MESSAGE ─────────────────────────────────────────────────────────
 function displayMessage(template, text, isUser = false) {
   const clone = template.cloneNode(true);
   clone.removeAttribute('id');
   clone.classList.remove('hidden');
 
   const textEl = clone.querySelector('p');
-  if (isUser) {
-    textEl.textContent = text;
-  } else {
-    textEl.innerHTML = marked.parse(text);
+  if (textEl) {
+    if (isUser) {
+      textEl.textContent = text;
+    } else {
+      textEl.innerHTML = marked.parse(text);
+    }
   }
 
-  // Stamp time
   const timeEl = clone.querySelector('.msg-time');
   if (timeEl) timeEl.textContent = timeNow();
 
@@ -55,13 +56,14 @@ function displayMessage(template, text, isUser = false) {
   return clone;
 }
 
-// --- 3. SEND MESSAGE ---
+// ── 3. SEND MESSAGE ────────────────────────────────────────────────────────────
 async function sendMessage() {
   const message = messageInput.value.trim();
   if (!message) return;
 
   displayMessage(userMessageTemplate, message, true);
   messageInput.value = '';
+  messageInput.style.height = 'auto';
 
   // Typing indicator
   const typingClone = typingIndicatorTemplate.cloneNode(true);
@@ -74,7 +76,7 @@ async function sendMessage() {
     const response = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, collection_name: currentCollectionName, history: [] })
+      body: JSON.stringify({ message, collection_name: currentCollectionName, history: [] }),
     });
 
     chatContainer.removeChild(typingClone);
@@ -83,14 +85,14 @@ async function sendMessage() {
     const data = await response.json();
     displayMessage(botMessageTemplate, data.answer);
 
-  } catch (error) {
+  } catch (err) {
     if (chatContainer.contains(typingClone)) chatContainer.removeChild(typingClone);
     displayMessage(botMessageTemplate, "Sorry, I couldn't reach the server.");
-    console.error(error);
+    console.error(err);
   }
 }
 
-// --- 4. MICROPHONE LOGIC ---
+// ── 4. MICROPHONE LOGIC ────────────────────────────────────────────────────────
 let isRecording = false;
 let mediaRecorder;
 let audioChunks = [];
@@ -98,6 +100,8 @@ let audioChunks = [];
 voiceBtn.addEventListener('click', async () => {
   if (isRecording) {
     voiceBtn.classList.remove('recording');
+    const micIcon = voiceBtn.querySelector('.material-symbols-outlined');
+    if (micIcon) micIcon.textContent = 'mic';
     isRecording = false;
     if (mediaRecorder) mediaRecorder.stop();
   } else {
@@ -113,10 +117,10 @@ voiceBtn.addEventListener('click', async () => {
         stream.getTracks().forEach(t => t.stop());
 
         const formData = new FormData();
-        formData.append("audio_file", audioBlob, "recording.webm");
+        formData.append('audio_file', audioBlob, 'recording.webm');
 
-        const loadingMsg = displayMessage(botMessageTemplate, "*Transcribing audio…*");
-        const res = await fetch("/transcribe-audio/", { method: "POST", body: formData });
+        const loadingMsg = displayMessage(botMessageTemplate, '*Transcribing audio…*');
+        const res  = await fetch('/transcribe-audio/', { method: 'POST', body: formData });
         const data = await res.json();
 
         chatContainer.removeChild(loadingMsg);
@@ -125,22 +129,29 @@ voiceBtn.addEventListener('click', async () => {
           messageInput.value = data.text_english;
           sendMessage();
         } else {
-          displayMessage(botMessageTemplate, "Could not understand audio.");
+          displayMessage(botMessageTemplate, 'Could not understand audio.');
         }
       };
 
       mediaRecorder.start();
       voiceBtn.classList.add('recording');
+      const micIcon = voiceBtn.querySelector('.material-symbols-outlined');
+      if (micIcon) micIcon.textContent = 'stop';
       isRecording = true;
+
     } catch (err) {
       console.error(err);
-      alert("Microphone access denied.");
+      alert('Microphone access denied.');
     }
   }
 });
 
-// --- 5. EVENT LISTENERS ---
+// ── 5. EVENT LISTENERS ─────────────────────────────────────────────────────────
 sendBtn.addEventListener('click', sendMessage);
+
 messageInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
 });

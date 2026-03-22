@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Upload PDF – KIIT Professor Finder</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Manrope:wght@200..800&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  
+  <!-- Shared stylesheet -->
+  <link rel="stylesheet" href="./style.css"/>
+
+  <style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+
+<body class="bg-background font-body text-on-surface selection:bg-tertiary-fixed selection:text-on-tertiary-fixed">
+
+  <!-- Background decorations -->
+  <div class="bg-decor-tr"></div>
+  <div class="bg-decor-bl"></div>
+
+  <!-- ── NAV ── -->
+  <nav class="site-nav">
+    <div class="nav-brand">
+      <img src="./kiit-logo.png" alt="KIIT Logo" class="nav-logo"/>
+      <span class="font-brand text-2xl font-bold italic text-primary tracking-tight">KIIT Professor Finder</span>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <div id="user-welcome-strip" class="user-strip hidden"></div>
+
+      <div class="profile-menu-container">
+        <img id="user-avatar"
+             src="https://ui-avatars.com/api/?name=Guest&background=102A43&color=fff"
+             class="profile-avatar hidden" alt="Profile"/>
+
+        <div id="profile-dropdown" class="dropdown-menu hidden">
+          <a href="/logout" class="dropdown-item danger">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+            Logout
+          </a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── MAIN ── -->
+  <main class="min-h-screen flex flex-col items-center px-4 pt-32 pb-16">
+    <div class="max-w-4xl w-full">
+
+      <!-- Page header -->
+      <header class="mb-12">
+        <h1 class="font-headline text-5xl md:text-6xl text-primary tracking-tight mb-5">
+          Analyze Academic<br/>
+          <span class="italic text-secondary">Documents.</span>
+        </h1>
+        <p class="font-body text-lg text-on-surface-variant max-w-xl leading-relaxed">
+          Upload research papers, course syllabi, or academic CVs to extract deep insights
+          and find matching expertise within the KIIT ecosystem.
+        </p>
+      </header>
+
+      <!-- Upload card -->
+      <section class="bg-surface-container rounded-xl p-1 overflow-hidden shadow-sm">
+        <div class="bg-surface-container-lowest rounded-[calc(0.5rem-1px)] p-8 md:p-12">
+
+          <!-- Drop zone -->
+          <div class="upload-zone group">
+            <input type="file" id="pdf-input" accept=".pdf"/>
+
+            <!-- Icon -->
+            <div class="mb-6 flex items-center justify-center w-20 h-20 rounded-xl bg-primary-fixed/60 group-hover:scale-110 transition-transform duration-200">
+              <span class="material-symbols-outlined text-primary text-4xl" style="font-variation-settings:'FILL' 1;">description</span>
+            </div>
+
+            <h2 class="font-headline text-2xl text-primary mb-2">Select a PDF File</h2>
+            <p class="font-body text-on-surface-variant text-center mb-6">
+              Drag and drop your file here, or click to browse.<br/>
+              <span class="font-label text-xs uppercase tracking-widest opacity-60">Maximum size: 25 MB</span>
+            </p>
+
+            <!-- File name pill -->
+            <div class="flex items-center gap-3 py-2 px-4 bg-surface-container-highest rounded-lg border border-outline-variant/10">
+              <span class="material-symbols-outlined text-secondary text-sm">article</span>
+              <span class="font-label text-sm font-medium text-secondary" id="file-name-display">No file selected</span>
+            </div>
+          </div>
+
+          <!-- Action row -->
+          <div class="mt-10 flex flex-col md:flex-row items-center justify-between gap-4 border-t border-outline-variant/10 pt-8">
+            <p id="status-message" class="status-msg error font-label text-sm"></p>
+
+            <button id="upload-btn" class="primary-btn w-full md:w-auto">
+              Upload and Start Chat
+              <span class="material-symbols-outlined text-lg">arrow_forward</span>
+            </button>
+          </div>
+
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ── LOADING OVERLAY ── -->
+  <div id="loading-widget" class="loading-overlay hidden">
+    <div class="loader-card">
+      <div class="loader-spinner"></div>
+      <div>
+        <h4 class="loading-title">Processing your Document…</h4>
+        <p class="loading-sub">Generating academic vector embeddings</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SCRIPTS ── -->
+  <script src="/static/upload.js"></script>
+
+</body>
+</html>
