@@ -1,10 +1,25 @@
-# Mini-project
+# KIIT-RAG — KIIT Professor Finder (Mini Project)
 
-This project is a full-stack web application that allows you to "chat" with your PDF documents.
+A full-stack RAG (Retrieval-Augmented Generation) web application that lets users query information about KIIT University professors through a conversational AI interface.
 
-What makes this project unique is its multimodal RAG (Retrieval-Augmented Generation) pipeline. It doesn't just read the text from your PDFs; it also uses a Vision-Language Model (VLM) to analyze any images, charts, or figures within the document. These image descriptions are embedded alongside the text, allowing you to ask questions about both the text and the visual content of your documents.
+The app combines a **static professor database** (`data.json`) with **user-uploaded PDF documents** to answer questions via a multimodal pipeline. It doesn't just read text — it uses a Vision-Language Model (VLM) to analyze images, charts, and figures within uploaded PDFs, converting them to searchable text descriptions.
 
-The application uses a FastAPI backend, a ChromaDB vector store, and a modern vanilla JS + Tailwind CSS frontend.   
+### Key Features
+
+- **Google OAuth + Guest login** — authenticated users can upload PDFs; guests can chat with the static professor database only.
+- **3-stage PDF processing pipeline** — PDF → Markdown extraction → Vision model image captioning → Vector embedding & ChromaDB storage.
+- **Hybrid retrieval** — every query searches both the global professor database and the user's uploaded documents.
+- **Smart query interception** — META questions (about the conversation) are answered from chat history; department count/list queries hit the cached `data.json` directly to avoid vector K-limit bias.
+- **History-aware follow-ups** — follow-up questions like "tell me more" are reformulated with context from chat history so the retriever fetches the right professor.
+- **Voice input** — record audio in the browser, transcribed via Google Speech Recognition, and sent as a chat message.
+- **Per-user data isolation** — each user's uploaded documents are stored in separate ChromaDB collections, cleaned up on logout.
+- **Chat history persistence** — localStorage (authenticated) / sessionStorage (guests) with daily auto-expiry.
+
+### Tech Stack
+
+**Backend:** FastAPI, LangChain, ChromaDB, Ollama (gpt-oss:120b), HuggingFace Embeddings (BGE-large-en-v1.5), Marker PDF, SpeechRecognition, Authlib (Google OAuth)
+
+**Frontend:** Vanilla HTML/CSS/JS, Marked.js (markdown rendering), MediaRecorder API (voice input),  Custom Material Design 3 UI with Tailwind CSS 
 
 ## Setup and Installation
 
@@ -51,7 +66,7 @@ The application uses a FastAPI backend, a ChromaDB vector store, and a modern va
             ```
     4. Create a `.env` file in the `Backend` directory:
         ```shell
-        touch .env
+        touch .env # On Windows(powershell): ni .env 
         ```
     5. Add your Ollama API and keys for Google auth facility key to the `.env` file:
         ```shell
@@ -76,22 +91,40 @@ The application uses a FastAPI backend, a ChromaDB vector store, and a modern va
 ## Project Structure
 
 ```bash
-├── .env              # add your env here
+Mini-project/
+├── .env                        # Environment secrets (OAuth keys, Ollama API key, session secret)
+├── .gitignore                  # Git exclusions (.env, venv, chromadb, etc.)
+├── Dockerfile                  # Docker containerization (Python 3.10, port 7860 for HF Spaces)
+├── README.md                   # This file — full project documentation
+│
 ├── Backend/
-│   ├── main.py             # FastAPI server: endpoints for upload, chat, STT
-│   ├── rag_components.py   # Loads LLM/Embedding models, builds the RAG chain
-│   ├── Base.py             # Pipeline Script 1: PDF -> Markdown + Images
-│   ├── Image-Testo.py      # Pipeline Script 2: Analyzes images using Ollama VLM
-│   ├── Emmbed.py           # Pipeline Script 3: Embeds final MD -> ChromaDB
-│   │
-│   └──chroma_db/          # Default directory for the persistent vector store 
-└── Frontend(basic)/
-    ├── upload.html         # PDF upload page
-    ├── index.html          # Main chat interface
-    ├── style.css           # Custom styles (e.g., typing indicator)
-    ├── script.js           # Chat page logic (sending messages, STT)
-    └── upload.js           # Upload page logic (handling file upload, redirecting)
-
-
+│   ├── __init__.py             # Makes Backend a Python package (required for imports)
+│   ├── main.py                 # FastAPI server: auth (Google OAuth + guest), routes, PDF upload,
+│   │                           #   audio transcription, chat endpoint with query interception
+│   ├── rag_components.py       # RAG logic: model loading, ChromaDB ingestion, hybrid retrieval,
+│   │                           #   history-aware chain, META/department query interception
+│   ├── Base.py                 # Pipeline Stage 1: PDF → Markdown + extracted images (Marker)
+│   ├── Image-Testo.py          # Pipeline Stage 2: Replace image links with AI descriptions
+│   │                           #   (Ollama Qwen3 vision model, auto-pulls model on startup)
+│   ├── Emmbed.py               # Pipeline Stage 3: Chunk markdown → generate embeddings → store
+│   │                           #   in ChromaDB (BGE-large-en-v1.5, 512-char chunks)
+│   ├── data.json               # Static professor database (KIIT faculty profiles, publications,
+│   │                           #   contact info) — cached at startup for direct department lookups
+│   ├── requirements.txt        # Python dependencies with pinned versions
+│   ├── chromadb/               # Global ChromaDB storage (static professor data, auto-created)
+│   └── users_data/
+│       └── chromadb/           # Per-user ChromaDB storage (uploaded PDF embeddings, auto-created)
+│
+└── frontend/
+    ├── index.html              # Login page (Google OAuth sign-in + guest mode)
+    ├── chat.html               # Main chat interface (message display, voice input, history)
+    ├── upload.html             # PDF upload page (file selection, processing status polling)
+    ├── script.js               # Chat logic: message send/receive, voice recording, markdown
+    │                           #   rendering, conversation history persistence (localStorage/session)
+    ├── upload.js               # Upload logic: file validation, upload to server, poll processing
+    │                           #   status, redirect to chat on completion
+    ├── style.css               # code for the theme, animations, responsive ui elements
+    ├── tailwind-config.js      # Shared Tailwind configuration — included in all pages before tailwind CDN
+    └── kiit-logo.png           # KIIT University brand logo
 ```
 

@@ -1,11 +1,21 @@
-from marker.converters.pdf import PdfConverter
-from marker.models import create_model_dict
-from marker.output import text_from_rendered
-from pathlib import Path
-from io import BytesIO
-import sys
+"""
+Base.py — PDF to Markdown extraction (Stage 1 of the 3-stage pipeline).
 
-# --- Configuration ---
+Converts a PDF file to Markdown text + extracted images using the Marker library.
+Called as a subprocess by main.py's run_processing_pipeline().
+
+Usage: python Base.py <path_to_pdf_file> [optional_output_dir]
+"""
+
+from marker.converters.pdf import PdfConverter    # Marker's PDF-to-rendered-output converter
+from marker.models import create_model_dict       # Create the model artifact dictionary needed by PdfConverter
+from marker.output import text_from_rendered       # Extract markdown text and image objects from rendered output
+from pathlib import Path                           # Object-oriented filesystem path construction
+from io import BytesIO                             # In-memory binary buffer — holds image bytes before writing
+                                                   # to disk, avoids creating intermediate temp files for each image
+import sys                                         # CLI argument parsing (sys.argv) and exit on error (sys.exit)
+
+# --- Configuration: parse CLI arguments ---
 if len(sys.argv) < 2:
     print("Error: No PDF file path provided.")
     print("Usage: python Base.py <path_to_pdf_file> [optional_output_dir]")
@@ -27,6 +37,7 @@ output_dir.mkdir(parents=True, exist_ok=True)
 print(f"Output directory set to: {output_dir}")
 
 # --- 1. Setup Converter and Process PDF ---
+# Initialize Marker's PdfConverter with default model dict and run it on the PDF.
 print(f"Initializing Marker converter for: {pdf_filename}")
 converter = PdfConverter(
     artifact_dict=create_model_dict(),
@@ -34,11 +45,12 @@ converter = PdfConverter(
 rendered = converter(pdf_filename)
 
 # --- 2. Extract Text and Images ---
+# Pull the markdown text and image objects from the rendered output.
 print("Extracting text and images...")
 text, _, images = text_from_rendered(rendered)
 
 # --- 3. Save the Markdown text file ---
-# We use the folder name as the filename (e.g., folder "doc1" -> "doc1.md")
+# Named after the output folder (e.g., folder "doc1" → "doc1.md").
 md_filename = output_dir / f"{output_dir.name}.md"
 
 try:
@@ -49,6 +61,7 @@ except Exception as e:
     print(f"An error occurred while writing the MD file: {e}")
 
 # --- 4. Save the image files ---
+# Iterate extracted images, determine format (PNG/JPEG), and write to output dir.
 print(f"\nSaving {len(images)} images...")
 for filename, image_object in images.items():
     image_path = output_dir / filename

@@ -29,8 +29,8 @@ WORKDIR /app/Backend
 # This allows "from Backend.rag_components" to work even though we are inside Backend
 ENV PYTHONPATH=/app
 
-# Expose FastAPI port
-EXPOSE 8000
+# Change EXPOSE to 7860
+EXPOSE 7860
 
-# Run FastAPI app
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Change uvicorn port to 7860
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

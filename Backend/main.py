@@ -1,38 +1,59 @@
-import os
-import shutil
-from dotenv import load_dotenv, find_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles 
-from pathlib import Path
-import speech_recognition as sr
-import io
-from pydub import AudioSegment
-import subprocess
-import sys
-from pydantic import BaseModel  
-from contextlib import asynccontextmanager
-import re
-from langchain_core.messages import HumanMessage, AIMessage 
-from typing import Dict 
+"""
+main.py — FastAPI server & route definitions.
 
-# --- Auth Imports ---
-from starlette.middleware.sessions import SessionMiddleware
-from authlib.integrations.starlette_client import OAuth
+Serves the frontend pages, handles Google OAuth / guest authentication,
+PDF upload with background processing, audio transcription, and the
+main chat endpoint that delegates to the RAG chain in rag_components.py.
+"""
 
-# --- RAG Components ---
+import os                        # Access environment variables via os.getenv()
+import shutil                    # shutil.rmtree() to delete temp dirs after pipeline processing
+from dotenv import load_dotenv, find_dotenv  # Load .env file for secrets (OAuth, session key)
+from fastapi import (            # FastAPI web framework core components
+    FastAPI,                     # Application instance
+    UploadFile, File,            # Handle file uploads (PDF, audio)
+    HTTPException,               # Return HTTP error responses
+    BackgroundTasks,             # Run PDF pipeline asynchronously in the background
+    Request,                     # Access session data and request info in routes
+)
+from fastapi.responses import (
+    HTMLResponse,                # Serve raw HTML pages (login, chat, upload)
+    RedirectResponse,            # Redirect after auth or page guards
+    JSONResponse,                # JSON replies for logout, session-expired, etc.
+)
+from fastapi.staticfiles import StaticFiles  # Mount frontend folder as /static for CSS/JS/images
+from pathlib import Path         # Object-oriented filesystem path construction
+import speech_recognition as sr  # Google Speech Recognition for audio-to-text transcription
+import io                        # io.BytesIO — in-memory binary stream for audio format conversion
+from pydub import AudioSegment   # Convert uploaded audio (webm) to WAV before transcription
+import subprocess                # Run pipeline scripts (Base.py, Image-Testo.py, Emmbed.py) as subprocesses
+import sys                       # sys.executable — get current Python interpreter path for subprocesses
+from pydantic import BaseModel   # Define typed request body schema (ChatRequest)
+from contextlib import asynccontextmanager  # Wrap app startup/shutdown logic in lifespan handler
+import re                        # Regex for filename sanitization and user ID cleaning
+from langchain_core.messages import HumanMessage, AIMessage  # Build typed chat history for LangChain RAG chain
+from typing import Dict          # Type hint for the processing_status dictionary
+
+from starlette.middleware.sessions import SessionMiddleware  # Cookie-based session middleware (24h expiry)
+from authlib.integrations.starlette_client import OAuth       # Google OAuth2 client for sign-in flow
+
 from Backend.rag_components import (
-    load_models,
-    get_rag_chain_for_collection,
-    check_and_ingest_json,
-    delete_user_collections
+    load_models,                 # Initialize LLM, embeddings, and ChromaDB at startup
+    get_rag_chain_for_collection,# Build the full RAG chain for a given user collection
+    check_and_ingest_json,       # Ingest data.json into ChromaDB's global collection
+    delete_user_collections,     # Remove all of a user's ChromaDB collections on logout
+    answer_from_history_only,    # Answer meta-questions purely from chat history
+    META_QUESTION_PATTERNS,      # Regex to detect conversation-about-itself questions
+    answer_department_query,     # Direct JSON lookup for department count/list queries
+    DEPARTMENT_QUERY_PATTERNS,
 )
 
-# --- Global Status Tracker ---
+# In-memory dict tracking PDF processing state per document.
+# Values: "processing" | "completed" | "failed"
 processing_status: Dict[str, str] = {}
 
 load_dotenv(find_dotenv())
-# --- Configuration ---
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -40,33 +61,40 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
     raise ValueError("Missing Google Auth credentials in .env file")
 
-# --- PATH CONFIGURATION ---
 BASE_DIR = Path(__file__).parent
 USERS_DATA_FOLDER = BASE_DIR / "users_data"
-USERS_CHROMA_DB_PATH = USERS_DATA_FOLDER / "chromadb" 
-ABSOLUTE_FRONTEND_PATH = BASE_DIR.parent / "Frontend(basic)"
+USERS_CHROMA_DB_PATH = USERS_DATA_FOLDER / "chromadb"
+ABSOLUTE_FRONTEND_PATH = BASE_DIR.parent / "frontend"
 
-# Verify Frontend Path Exists (Debug Check)
 if not ABSOLUTE_FRONTEND_PATH.exists():
     print(f"WARNING: Frontend path not found at {ABSOLUTE_FRONTEND_PATH}")
 
 USERS_DATA_FOLDER.mkdir(exist_ok=True)
 USERS_CHROMA_DB_PATH.mkdir(exist_ok=True)
 
-# --- Lifespan ---
+
+# App startup hook — loads LLM + embedding models and ingests static
+# JSON data into ChromaDB before the server starts accepting requests.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Application startup...")
-    load_models()       
-    check_and_ingest_json() 
+    load_models()
+    check_and_ingest_json()
     yield
     print("Application shutdown...")
 
+
 app = FastAPI(lifespan=lifespan)
 
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=False, same_site="lax")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    https_only=False,
+    same_site="lax",
+    session_cookie="session",
+    max_age=86400,  # 24 hours — prevents mid-conversation expiry
+)
 
-# --- Mount Static Files Correctly ---
 app.mount("/static", StaticFiles(directory=ABSOLUTE_FRONTEND_PATH), name="static")
 
 oauth = OAuth()
@@ -78,39 +106,55 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
+
+# Pydantic model for the /chat POST body:
+# user message, optional uploaded-doc collection name, and recent chat history.
 class ChatRequest(BaseModel):
     message: str
     collection_name: str | None = None
     history: list[dict] = []
 
+
 def sanitize_name(name: str) -> str:
+    """Clean a filename for use as a ChromaDB collection name.
+    Strips special chars, ensures minimum 3 chars, caps at 63."""
     name = name.replace(' ', '_')
     name = re.sub(r'[^a-zA-Z0-9._-]', '', name)
-    if len(name) < 3: name = f"doc_{name}"
+    if len(name) < 3:
+        name = f"doc_{name}"
     return name[:63]
 
+
 def get_unique_collection_name(user_id: str, short_name: str) -> str:
+    """Build a per-user collection name like u_{userId}_{docName} (max 63 chars)
+    to isolate each user's uploaded documents in ChromaDB."""
     safe_uid = re.sub(r'[^a-zA-Z0-9]', '', user_id)
     return f"u_{safe_uid}_{short_name}"[:63]
 
+
 def run_processing_pipeline(pdf_path: Path, unique_collection_name: str, short_name: str):
+    """Background task that runs the 3-stage PDF pipeline:
+    Base.py (extract PDF → markdown + images)
+    → Image-Testo.py (caption images via vision model)
+    → Emmbed.py (chunk, embed, store in ChromaDB).
+    Cleans up temp files on completion regardless of success/failure."""
     global processing_status
     try:
         processing_status[short_name] = "processing"
-        output_dir = pdf_path.parent 
+        output_dir = pdf_path.parent
         base_md_file = output_dir / f"{output_dir.name}.md"
         described_md_file = output_dir / f"{output_dir.name}_with_descriptions.md"
         python_executable = sys.executable
-        
+
         print(f"\n--- [PIPELINE START] Collection: {unique_collection_name} ---")
         subprocess.run([python_executable, "Base.py", str(pdf_path), str(output_dir)], check=True, capture_output=True, text=True)
         subprocess.run([python_executable, "Image-Testo.py", str(base_md_file), str(output_dir), str(described_md_file)], check=True, capture_output=True, text=True)
         subprocess.run([python_executable, "Emmbed.py", str(described_md_file), unique_collection_name, str(USERS_CHROMA_DB_PATH)], check=True, capture_output=True, text=True)
-        
-        print(f"--- [PIPELINE SUCCCESS] ---")
+
+        print(f"--- [PIPELINE SUCCESS] ---")
         processing_status[short_name] = "completed"
     except Exception as e:
-        print(f"!!!!!! [PIPELINE FAILED] {e} !!!!!!")
+        print(f"[PIPELINE FAILED] {e}")
         processing_status[short_name] = "failed"
     finally:
         if output_dir.exists():
@@ -119,7 +163,10 @@ def run_processing_pipeline(pdf_path: Path, unique_collection_name: str, short_n
             except Exception as e:
                 print(f"Error cleanup: {e}")
 
+
 def transcribe_and_translate_audio(audio_content: bytes) -> dict:
+    """Convert uploaded audio bytes to WAV, run Google Speech Recognition,
+    and return the English transcript. Falls back to an error message on failure."""
     r = sr.Recognizer()
     try:
         audio_segment = AudioSegment.from_file(io.BytesIO(audio_content))
@@ -132,24 +179,38 @@ def transcribe_and_translate_audio(audio_content: bytes) -> dict:
     except Exception:
         return {"text_english": "Could not understand audio."}
 
-# --- HELPER: Cleanup Logic ---
-async def perform_cleanup(request: Request):
+
+async def _delete_user_data_and_clear_session(request: Request):
+    """Full cleanup on explicit logout: wipes ChromaDB collections + session."""
     user = request.session.get('user')
     if user and user.get('sub') != 'guest':
         user_id = user.get('sub')
-        print(f"--- [CLEANUP] Deleting data for user: {user_id} ---")
+        print(f"--- [FULL CLEANUP] Deleting data for user: {user_id} ---")
         delete_user_collections(str(USERS_CHROMA_DB_PATH), user_id)
     request.session.clear()
 
-# --- ROUTES ---
+
+async def _clear_session_only(request: Request):
+    """Light cleanup for tab-close beacon: only clears the cookie."""
+    request.session.clear()
+
+
+# ──────────────────────────────────────────────
+# ROUTES — Authentication
+# ──────────────────────────────────────────────
 
 @app.get("/login/google")
 async def login_google(request: Request):
-    redirect_uri = "http://localhost:8000/auth/google/callback" 
+    """Initiate Google OAuth flow — redirects the user to Google's consent screen."""
+    #base_url = "https://pager-dot-kiit-rag.hf.space" # used this for the deploymet
+    base_url = "http://localhost:8000" #for local testing
+    redirect_uri = f"{base_url}/auth/google/callback"
     return await oauth.google.authorize_redirect(request, redirect_uri)
+
 
 @app.get("/auth/google/callback")
 async def auth_google_callback(request: Request):
+    """Handle Google OAuth callback — store user info in session, redirect to upload page."""
     try:
         token = await oauth.google.authorize_access_token(request)
         user = token.get('userinfo')
@@ -160,54 +221,93 @@ async def auth_google_callback(request: Request):
         return HTMLResponse(content=f"<h1>Authentication Failed</h1><p>{e}</p>")
     return RedirectResponse(url='/')
 
+
 @app.get("/login/guest")
 async def login_guest(request: Request):
+    """Create a guest session (no OAuth) and redirect to chat. Guests cannot upload PDFs."""
     request.session['user'] = {'sub': 'guest', 'name': 'Guest User', 'email': 'guest@local'}
     return RedirectResponse(url='/chat')
 
+
 @app.post("/end_session")
 async def end_session(request: Request):
-    """Called via AJAX/Beacon when tab closes."""
-    await perform_cleanup(request)
-    return JSONResponse(content={"message": "Session ended"})
+    """
+    Called by the tab-close beacon (beforeunload).
+    Only clears the session cookie — does NOT delete ChromaDB data,
+    because beforeunload also fires on page refresh.
+    """
+    await _clear_session_only(request)
+    return JSONResponse(content={"message": "Session cleared"})
+
 
 @app.get("/logout")
 async def logout(request: Request):
-    """Called when user clicks Logout button."""
-    await perform_cleanup(request)
-    # REDIRECT to home page (Login)
-    return RedirectResponse(url='/', status_code=303)
+    """
+    Explicit logout button. Full cleanup.
+    Returns JSON so frontend fetch() can navigate — avoids the 303-in-fetch bug.
+    Frontend should do: const d = await res.json(); window.location.href = d.redirect;
+    """
+    await _delete_user_data_and_clear_session(request)
+    return JSONResponse(content={"logged_out": True, "redirect": "/"})
+
+
+# ──────────────────────────────────────────────
+# ROUTES — Page Serving
+# ──────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_login_page(request: Request):
+    """Serve index.html (login page). Redirects to /chat if already logged in."""
     if request.session.get('user'):
         return RedirectResponse(url='/chat')
     path = ABSOLUTE_FRONTEND_PATH / "index.html"
     return HTMLResponse(content=path.read_text(encoding='utf-8'))
 
+
 @app.get("/upload", response_class=HTMLResponse)
 async def serve_upload_page(request: Request):
+    """Serve upload.html for authenticated users. Guests → chat, unauthenticated → login."""
     user = request.session.get('user')
-    if not user: return RedirectResponse(url='/')
-    if user.get('sub') == 'guest': return RedirectResponse(url='/chat')
+    if not user:
+        return RedirectResponse(url='/')
+    if user.get('sub') == 'guest':
+        return RedirectResponse(url='/chat')
     path = ABSOLUTE_FRONTEND_PATH / "upload.html"
     return HTMLResponse(content=path.read_text(encoding='utf-8'))
 
+
 @app.get("/chat", response_class=HTMLResponse)
 async def serve_chat_page(request: Request):
-    if not request.session.get('user'): return RedirectResponse(url='/')
+    """Serve chat.html. Redirects to login if no active session."""
+    if not request.session.get('user'):
+        return RedirectResponse(url='/')
     path = ABSOLUTE_FRONTEND_PATH / "chat.html"
     return HTMLResponse(content=path.read_text(encoding='utf-8'))
 
+
+# ──────────────────────────────────────────────
+# ROUTES — PDF Upload & Processing
+# ──────────────────────────────────────────────
+
 @app.get("/status/{collection_name}")
 async def get_processing_status(collection_name: str):
+    """Return current PDF processing status for polling from the upload page."""
     return {"status": processing_status.get(collection_name, "unknown")}
 
+
 @app.post("/upload-pdf/")
-async def upload_pdf(request: Request, file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def upload_pdf(
+    # Handles PDF upload — validates auth, file type, size (1MB max),
+    # saves to a temp dir, and kicks off the background processing pipeline.
+    request: Request,
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
     user = request.session.get('user')
-    if not user: raise HTTPException(status_code=401, detail="Not authenticated")
-    if user.get('sub') == 'guest': raise HTTPException(status_code=403, detail="Guests cannot upload.")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if user.get('sub') == 'guest':
+        raise HTTPException(status_code=403, detail="Guests cannot upload.")
 
     file.file.seek(0, 2)
     file_size = file.file.tell()
@@ -218,34 +318,72 @@ async def upload_pdf(request: Request, file: UploadFile = File(...), background_
     try:
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Only PDF files allowed.")
-        
+
         user_id = user.get('sub')
         safe_filename = sanitize_name(Path(file.filename).stem)
         temp_dir = USERS_DATA_FOLDER / f"temp_{user_id}_{safe_filename}"
         temp_dir.mkdir(parents=True, exist_ok=True)
         file_path = temp_dir / file.filename
-        
+
         with open(file_path, "wb") as buffer:
-            while content := await file.read(1024 * 1024):  
+            while content := await file.read(1024 * 1024):
                 buffer.write(content)
-        
+
         unique_col_name = get_unique_collection_name(user_id, safe_filename)
         background_tasks.add_task(run_processing_pipeline, file_path, unique_col_name, safe_filename)
-        
+
         return {"filename": file.filename, "message": "Processing...", "collection_name": safe_filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
+
+# ──────────────────────────────────────────────
+# ROUTES — Audio Transcription
+# ──────────────────────────────────────────────
+
 @app.post("/transcribe-audio/")
 async def transcribe_audio(audio_file: UploadFile = File(...)):
+    """Accept an audio file upload and return the transcribed English text."""
     content = await audio_file.read()
     return transcribe_and_translate_audio(content)
 
+
+# ──────────────────────────────────────────────
+# ROUTES — Chat
+# ──────────────────────────────────────────────
+
 @app.post("/chat")
 async def handle_chat_message(request: Request, chat_req: ChatRequest):
+    """Main chat endpoint. Builds LangChain message history, intercepts
+    META questions (about the conversation) and department count/list queries,
+    and falls back to the full RAG chain for everything else."""
     user = request.session.get('user')
-    if not user: return {"answer": "Session expired."}
-    
+    if not user:
+        return JSONResponse(
+            status_code=401,
+            content={"answer": "Session expired. Please log in again.", "session_expired": True}
+        )
+
+    # --- Build chat history objects ---
+    chat_history = []
+    for msg in chat_req.history:
+        if msg['role'] == 'user':
+            chat_history.append(HumanMessage(content=msg['content']))
+        elif msg['role'] == 'assistant':
+            chat_history.append(AIMessage(content=msg['content']))
+
+    # --- META-QUESTION INTERCEPTION ---
+    if META_QUESTION_PATTERNS.search(chat_req.message):
+        answer = answer_from_history_only(chat_req.message, chat_history)
+        return {"answer": answer}
+
+    # --- DEPARTMENT COUNT/LIST INTERCEPTION ---
+    # "How many professors in CSE?" hits data.json directly — the vector
+    # retriever's k limit would otherwise give a wildly wrong count.
+    dept_answer = answer_department_query(chat_req.message)
+    if dept_answer is not None:
+        return {"answer": dept_answer}
+
     user_id = user.get('sub')
     target_collection = None
     if user_id != 'guest' and chat_req.collection_name:
@@ -253,21 +391,24 @@ async def handle_chat_message(request: Request, chat_req: ChatRequest):
 
     try:
         rag_chain = get_rag_chain_for_collection(str(USERS_CHROMA_DB_PATH), target_collection)
-        if rag_chain is None: return {"answer": "System initializing..."}
-            
-        chat_history = []
-        for msg in chat_req.history:
-            if msg['role'] == 'user': chat_history.append(HumanMessage(content=msg['content']))
-            elif msg['role'] == 'assistant': chat_history.append(AIMessage(content=msg['content']))
-            
+        if rag_chain is None:
+            return {"answer": "System initializing, please try again in a moment."}
+
         result = rag_chain.invoke({"input": chat_req.message, "chat_history": chat_history})
         return {"answer": result["answer"]}
     except Exception as e:
         print(f"Chat Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ──────────────────────────────────────────────
+# ROUTES — User Info
+# ──────────────────────────────────────────────
+
 @app.get("/user_info")
 async def get_user_info(request: Request):
+    """Return the logged-in user's name, email, picture, and sub (user ID)."""
     user = request.session.get('user')
-    if user: return {"name": user.get('name'), "email": user.get('email'), "picture": user.get('picture')}
+    if user:
+        return {"name": user.get('name'), "email": user.get('email'), "picture": user.get('picture'), "sub": user.get('sub')}
     return {"error": "Not logged in"}

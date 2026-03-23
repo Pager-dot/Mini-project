@@ -1,9 +1,21 @@
-import re
-from ollama import chat, ChatResponse
-import os
-import sys # Added to read command-line arguments
+"""
+Image-Testo.py — Vision model image captioning (Stage 2 of the 3-stage pipeline).
 
-# --- Configuration (now from command-line) ---
+Reads a markdown file, finds all ![alt](path) image links, sends each image
+to Ollama's Qwen3 vision model for a text description, and replaces the
+image links with the AI-generated descriptions. This ensures images
+(charts, tables, diagrams) become searchable text in the vector store.
+
+Usage: python Image-Testo.py <input_md_file> <image_directory> <output_md_file>
+"""
+
+import re                                # Regex to find ![alt](path) image markdown patterns
+from ollama import chat, ChatResponse    # chat: send images to Ollama vision model; ChatResponse: typed response object
+import os                                # os.path.join/exists for image file path construction and validation
+import sys                               # CLI argument parsing (sys.argv) and exit on error (sys.exit)
+import subprocess                        # Run 'ollama run' to ensure the vision model is pulled/available
+
+# --- Configuration: parse CLI arguments ---
 if len(sys.argv) < 4:
     print("Error: Missing arguments.")
     print("Usage: python Image-Testo.py <input_md_file> <image_directory> <output_md_file>")
@@ -14,17 +26,40 @@ IMAGE_DIRECTORY = sys.argv[2] # The directory where images are stored
 OUTPUT_FILE = sys.argv[3]     # The file to save the result
 # -----------------------------------------------
 
-# Run this '''ollama run qwen3-vl:235b-cloud''' if the vision is not working
-MODEL_NAME = 'qwen3-vl:235b-cloud' 
+MODEL_NAME = 'qwen3-vl:235b-cloud'
+
+
+def ensure_model_available():
+    """Ensure the Ollama vision model is pulled and ready before processing.
+    Runs 'ollama pull <model>' which is a no-op if the model already exists."""
+    print(f"--- Ensuring Ollama model '{MODEL_NAME}' is available ---")
+    try:
+        subprocess.run(
+            ["ollama", "pull", MODEL_NAME],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"--- Model '{MODEL_NAME}' is ready ---")
+    except FileNotFoundError:
+        print("Warning: 'ollama' CLI not found on PATH. Assuming model is already available.")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Failed to pull model '{MODEL_NAME}': {e.stderr.strip()}")
+        print("Proceeding anyway — the model may already be cached.")
+
+
+# Pull the vision model at script startup so it's ready for image captioning.
+ensure_model_available()
 PROMPT = 'Describe the content of this image concisely and precisely, focusing on any numerical data present. If no numerical data is present, simply describe the image.'
 # ---------------------
 
 def get_image_description(image_filename: str) -> str:
-    """
-    Calls the Ollama LMM to get a description for the given image file.
-    
+    """Send a single image to the Ollama vision model and return a markdown
+    blockquote with the AI-generated description. Handles missing files
+    gracefully by returning a placeholder string.
+
     Args:
-        image_filename: The filename extracted from the markdown link 
+        image_filename: The filename extracted from the markdown link
                         (e.g., '_page_4_Figure_2.jpeg').
     """
     # Construct the full path by joining the directory and the filename
@@ -62,10 +97,9 @@ def get_image_description(image_filename: str) -> str:
 
 
 def replace_images_in_readme(input_file: str, output_file: str):
-    """
-    Reads the input file, replaces image markdown with model descriptions, 
-    and writes the result to the output file.
-    """
+    """Read the markdown file, find all ![alt](path) patterns via regex,
+    replace each with the vision model's AI-generated description,
+    and write the result to the output file."""
     try:
         with open(input_file, 'r', encoding='utf-8') as f:
             content = f.read()

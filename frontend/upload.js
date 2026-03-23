@@ -1,5 +1,14 @@
+/**
+ * upload.js — PDF upload page logic.
+ *
+ * Handles user info display (welcome message + avatar dropdown),
+ * PDF file selection & validation, upload to /upload-pdf/, and
+ * polling /status/{collectionName} until processing completes or fails.
+ */
+
 document.addEventListener('DOMContentLoaded', () => {
 
+    // --- Fetch user info and set up profile display / dropdown ---
     fetch('/user_info')
         .then(response => response.json())
         .then(data => {
@@ -13,13 +22,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     avatar.src = data.picture;
                     avatar.classList.remove('hidden');
 
-                    // Toggle Dropdown on Click
+                    // Toggle dropdown visibility on avatar click.
                     avatar.addEventListener('click', (e) => {
-                        e.stopPropagation(); // Prevent click from bubbling
+                        e.stopPropagation();
                         dropdown.classList.toggle('show');
                     });
 
-                    // Close dropdown if clicking outside
+                    // Close dropdown when clicking anywhere else on the page.
                     document.addEventListener('click', () => {
                         dropdown.classList.remove('show');
                     });
@@ -36,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!pdfInput || !uploadBtn) return;
 
+    // Update the displayed filename when the user selects a PDF.
     pdfInput.addEventListener('change', () => {
         if (pdfInput.files.length > 0) {
             fileNameDisplay.textContent = pdfInput.files[0].name;
@@ -45,7 +55,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-    // --- Status Polling Function ---
+    // --- Status Polling ---
+    // Poll /status/{collectionName} every 2 seconds.
+    // On "completed" → redirect to chat page. On "failed" → show error and re-enable upload.
     const pollProcessingStatus = async (collectionName) => {
         const intervalId = setInterval(async () => {
             try {
@@ -67,6 +79,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 2000); // Check every 2 seconds
     };
 
+    // --- Upload Button Handler ---
+    // Validate PDF selection, upload to /upload-pdf/, store the returned collection
+    // name and filename in sessionStorage, show loading widget, and start polling.
     uploadBtn.addEventListener('click', async () => {
         const file = pdfInput.files[0];
         if (!file || !file.name.toLowerCase().endsWith(".pdf")) {

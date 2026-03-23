@@ -2,3 +2,5 @@
 Backend/venv
 .vscode
 .github
+#It's for hugging face deployment no need in git repo 
+.gitattributes 

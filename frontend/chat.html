@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KIIT Professor Finder – Chat</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Manrope:wght@200..800&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+
+  <!-- Marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <!-- Tailwind config MUST come before CDN script -->
+  <script src="/static/tailwind-config.js"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+  <!-- Shared stylesheet -->
+  <link rel="stylesheet" href="/static/style.css"/>
+
+  <style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+
+<body class="font-body text-on-surface flex flex-col h-screen overflow-hidden mesh-gradient">
+
+  <!-- ── HEADER ── -->
+  <header class="site-nav" style="position:sticky;">
+    <div class="nav-brand">
+      <img src="/static/kiit-logo.png" alt="KIIT Logo" class="nav-logo"/>
+      <span class="font-brand text-xl font-extrabold text-primary tracking-tight">KIIT Professor Finder</span>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <div class="user-strip hidden" id="user-strip">
+        <span class="label">Logged in as</span>
+        <span class="name" id="user-name">Guest</span>
+      </div>
+
+      <div class="profile-menu-container">
+        <img id="chat-user-avatar"
+             src="https://ui-avatars.com/api/?name=Guest&background=102A43&color=fff"
+             class="profile-avatar" alt="Profile"/>
+
+        <div id="chat-profile-dropdown" class="dropdown-menu hidden">
+          <button id="end-chat-btn" class="dropdown-item danger">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+            End Chat &amp; Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── CHAT MAIN ── -->
+  <main class="flex-1 flex flex-col relative overflow-hidden">
+
+    <!-- Chat history scroll area -->
+    <section class="chat-history" id="chat-container">
+
+      <!-- Welcome banner -->
+      <div class="flex flex-col items-center mb-6">
+        <div class="w-14 h-14 rounded-full flex items-center justify-center mb-3 shadow-md"
+             style="background:linear-gradient(135deg,#00152a,#102a43);">
+          <span class="material-symbols-outlined text-white text-2xl" style="font-variation-settings:'FILL' 1;">smart_toy</span>
+        </div>
+        <h2 class="font-headline text-2xl text-center text-primary">Academic Research Assistant</h2>
+        <p class="font-body text-on-surface-variant text-sm text-center max-w-md mx-auto mt-1">
+          Providing scholarly insights across the institution.
+        </p>
+      </div>
+
+      <!-- Initial greeting bubble -->
+      <div class="msg-row" id="init-msg">
+        <div class="msg-avatar bot-avatar">
+          <span class="material-symbols-outlined text-sm" style="font-variation-settings:'FILL' 1;">auto_awesome</span>
+        </div>
+        <div>
+          <div class="bubble bot-bubble prose">
+            Hello! I&rsquo;m your scholarly assistant. How may I assist your research objectives today?
+          </div>
+          <div class="msg-time" id="init-time"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Input bar -->
+    <div class="input-bar-wrap">
+      <div class="max-w-5xl mx-auto">
+        <div class="input-bar" id="input-bar">
+          <textarea id="message-input"
+                    placeholder="Ask about research papers, faculty, or departments…"
+                    rows="1"
+                    autocomplete="off"></textarea>
+
+          <div class="flex items-center gap-1">
+            <button id="voice-btn" class="icon-btn mic-btn" title="Use Microphone">
+              <span class="material-symbols-outlined">mic</span>
+            </button>
+            <button id="send-btn" class="icon-btn send-btn" title="Send">
+              <span class="material-symbols-outlined">send</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  
+
+  <!-- ── HIDDEN TEMPLATES ── -->
+  <div id="user-message-template" class="hidden">
+    <div class="msg-row user">
+      <div>
+        <div class="bubble user-bubble"><p></p></div>
+        <div class="msg-time" style="text-align:right;"></div>
+      </div>
+      <div class="msg-avatar user-avatar">
+        <span class="material-symbols-outlined text-on-secondary-container" style="font-size:18px;">person</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="bot-message-template" class="hidden">
+    <div class="msg-row">
+      <div class="msg-avatar bot-avatar">
+        <span class="material-symbols-outlined text-sm" style="font-variation-settings:'FILL' 1;">auto_awesome</span>
+      </div>
+      <div>
+        <div class="bubble bot-bubble prose"><p></p></div>
+        <div class="msg-time"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="typing-indicator-template" class="hidden">
+    <div class="msg-row">
+      <div class="msg-avatar bot-avatar">
+        <span class="material-symbols-outlined text-sm" style="font-variation-settings:'FILL' 1;">auto_awesome</span>
+      </div>
+      <div class="typing-indicator">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── INIT TIME ── -->
+  <script>
+    document.getElementById('init-time').textContent =
+      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  </script>
+
+  <!-- ── MAIN CHAT SCRIPT ── -->
+  <script src="/static/script.js"></script>
+
+  <script>
+    // Auto-resize textarea
+    const msgInput = document.getElementById('message-input');
+    msgInput.addEventListener('input', function () {
+      this.style.height = 'auto';
+      this.style.height = this.scrollHeight + 'px';
+    });
+
+    // Tab close cleanup
+    window.addEventListener('beforeunload', e => {
+      e.preventDefault();
+      e.returnValue = '';
+      navigator.sendBeacon('/end_session');
+    });
+
+    // End chat button
+    document.getElementById('end-chat-btn').addEventListener('click', async () => {
+      if (confirm('End chat? This will delete your session data.')) {
+        await fetch('/end_session', { method: 'POST' });
+        window.location.href = '/';
+      }
+    });
+
+    // Dropdown toggle
+    const chatAvatar   = document.getElementById('chat-user-avatar');
+    const chatDropdown = document.getElementById('chat-profile-dropdown');
+    chatAvatar.addEventListener('click', e => {
+      e.stopPropagation();
+      chatDropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', () => chatDropdown.classList.add('hidden'));
+  </script>
+
+</body>
+</html>
